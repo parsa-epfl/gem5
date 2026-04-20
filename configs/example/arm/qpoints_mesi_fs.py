@@ -197,6 +197,16 @@ def run(args):
     if args.warmup_insts:
         while True:
             event = m5.simulate(250000000)
+            exit_msg = event.getCause()
+            if exit_msg != "simulate() limit reached":
+                print(
+                    "Warmup terminated before reaching --warmup-insts:",
+                    exit_msg,
+                    "@",
+                    m5.curTick(),
+                )
+                m5.stats.dump()
+                sys.exit(event.getCode())
             m5.stats.dump()
             if parse_stats(args):
                 break
