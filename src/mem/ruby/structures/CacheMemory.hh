@@ -42,6 +42,7 @@
 #ifndef __MEM_RUBY_STRUCTURES_CACHEMEMORY_HH__
 #define __MEM_RUBY_STRUCTURES_CACHEMEMORY_HH__
 
+#include <fstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -145,6 +146,7 @@ class CacheMemory : public SimObject
     // Print cache contents
     void print(std::ostream& out) const;
     void printData(std::ostream& out) const;
+    void dumpCacheState() const;
 
     bool checkResourceAvailable(CacheResourceType res, Addr addr);
     void recordRequestType(CacheRequestType requestType, Addr addr);
@@ -175,6 +177,8 @@ class CacheMemory : public SimObject
   private:
     // Data Members (m_prefix)
     bool m_is_instruction_only_cache;
+    bool m_dump_cache_state;
+    std::string m_dump_cache_state_path;
 
     // The first index is the # of cache lines.
     // The second index is the the amount associativity.
