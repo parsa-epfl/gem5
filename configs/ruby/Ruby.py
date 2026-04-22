@@ -138,6 +138,9 @@ def setup_memory_controllers(system, ruby, dir_cntrls, options):
             dram_intf = MemConfig.create_mem_intf(mem_type, r, index,
                 int(math.log(options.num_dirs, 2)),
                 intlv_size, options.xor_low_bit)
+            if issubclass(mem_type, DRAMInterface) and \
+               getattr(options, "mem_ranks", None):
+                dram_intf.ranks_per_channel = options.mem_ranks
             if issubclass(mem_type, DRAMInterface):
                 mem_ctrl = m5.objects.MemCtrl(dram = dram_intf)
             else:
