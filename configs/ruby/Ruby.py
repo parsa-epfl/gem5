@@ -65,6 +65,10 @@ def define_options(parser):
         "--access-backing-store", action="store_true", default=False,
         help="Should ruby maintain a second copy of memory")
 
+    parser.add_argument(
+        "--dump-cache-state", action="store_true", default=False,
+        help="Dump Ruby cache contents at simulator exit")
+
     # Options related to cache structure
     parser.add_argument(
         "--ports", action="store", type=int, default=4,
