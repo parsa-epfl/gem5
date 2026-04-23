@@ -184,7 +184,7 @@ Sequencer::logDataTrace(PacketPtr pkt, RubyRequestType trace_type) const
         static_cast<unsigned long long>(vaddr),
         static_cast<unsigned long long>(pkt->getAddr()),
         pkt->getSize(),
-        RubyRequestType_to_string(trace_type).c_str()
+        RubyRequestType_to_string(trace_type)
     );
 }
 
