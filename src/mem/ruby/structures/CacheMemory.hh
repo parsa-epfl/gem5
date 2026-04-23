@@ -42,7 +42,6 @@
 #ifndef __MEM_RUBY_STRUCTURES_CACHEMEMORY_HH__
 #define __MEM_RUBY_STRUCTURES_CACHEMEMORY_HH__
 
-#include <fstream>
 #include <string>
 #include <unordered_map>
 #include <vector>

@@ -41,6 +41,8 @@
 
 #include "mem/ruby/structures/CacheMemory.hh"
 
+#include <fstream>
+
 #include "base/compiler.hh"
 #include "base/intmath.hh"
 #include "base/logging.hh"
@@ -88,8 +90,14 @@ CacheMemory::CacheMemory(const Params &p)
     m_use_occupancy = dynamic_cast<replacement_policy::WeightedLRU*>(
                                     m_replacementPolicy_ptr) ? true : false;
 
-    if (m_dump_cache_state && !m_dump_cache_state_path.empty()) {
-        registerExitCallback([this]() { dumpCacheState(); });
+    if (m_dump_cache_state) {
+        if (!m_dump_cache_state_path.empty()) {
+            registerExitCallback([this]() { dumpCacheState(); });
+        } else {
+            warn("Cache state dumping enabled for %s, but "
+                 "dump_cache_state_path is empty; no cache state will be "
+                 "dumped.", name());
+        }
     }
 }
 
