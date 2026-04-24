@@ -230,6 +230,8 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     if rom_dir_cntrl_node is not None:
         dir_cntrl_nodes.append(rom_dir_cntrl_node)
     for dir_cntrl in dir_cntrl_nodes:
+        dir_cntrl.restore_llc_state = bool(restore_file)
+        dir_cntrl.llc_restore_file = restore_file if restore_file else ""
         # Connect the directory controllers and the network
         dir_cntrl.requestToDir = MessageBuffer()
         dir_cntrl.requestToDir.in_port = ruby_system.network.out_port

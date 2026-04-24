@@ -273,8 +273,8 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     readDataFromMemory(addr, cache_entry.DataBlk);
     cache_entry.Dirty := false;
     cache_entry.Sharers.clear();
-    cache_entry.CacheState := State:SS;
-    setAccessPermission(cache_entry, addr, State:SS);
+    cache_entry.CacheState := State:M;
+    setAccessPermission(cache_entry, addr, State:M);
     L2cache.setMRU(addr);
     L2cache.markCheckpointLoad(addr);
   }
