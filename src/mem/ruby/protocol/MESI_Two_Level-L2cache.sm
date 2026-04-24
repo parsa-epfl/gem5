@@ -276,6 +276,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
     cache_entry.CacheState := State:SS;
     setAccessPermission(cache_entry, addr, State:SS);
     L2cache.setMRU(addr);
+    L2cache.markCheckpointLoad(addr);
   }
 
   void applyWarmLineAddr(Addr addr) {
@@ -290,6 +291,10 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
 
   Event L1Cache_request_type_to_event(CoherenceRequestType type, Addr addr,
                                       MachineID requestor, Entry cache_entry) {
+    if (is_valid(cache_entry)) {
+      L2cache.noteCheckpointLoadHit(addr);
+    }
+
     if(type == CoherenceRequestType:GETS) {
       return Event:L1_GETS;
     } else if(type == CoherenceRequestType:GET_INSTR) {
