@@ -27,6 +27,7 @@
 
 import math
 import os
+from pathlib import Path
 import m5
 from m5.objects import *
 from m5.defines import buildEnv
@@ -38,6 +39,43 @@ from .Ruby import send_evicts
 #
 class L1Cache(RubyCache): pass
 class L2Cache(RubyCache): pass
+
+GEM5_UARCH_SUFFIX = ".gem5_uarch"
+LLC_RESTORE_STAGED = "llc_restore_addrs.txt"
+
+
+def discover_llc_restore_file(options):
+    if not getattr(options, "restore_llc_state", False):
+        return None
+
+    if not getattr(options, "restore", None):
+        m5.util.warn(
+            "--restore-llc-state was set without --restore; "
+            "skipping LLC warm-state import."
+        )
+        return None
+
+    restore_dir = Path(options.restore).resolve()
+    workload_dir = restore_dir.parent
+    snapshot_name = restore_dir.name
+    gem5_uarch_dir = workload_dir / f"{snapshot_name}{GEM5_UARCH_SUFFIX}"
+    target_path = gem5_uarch_dir / LLC_RESTORE_STAGED
+
+    if not gem5_uarch_dir.is_dir():
+        m5.util.warn(
+            f"gem5 uarch restore directory not found: {gem5_uarch_dir}. "
+            "Running with a cold LLC."
+        )
+        return None
+
+    if not target_path.is_file():
+        m5.util.warn(
+            f"LLC restore address file not found in gem5 uarch directory: "
+            f"{target_path}. Running with a cold LLC."
+        )
+        return None
+
+    return str(target_path)
 
 def define_options(parser):
     return
@@ -127,6 +165,8 @@ def create_system(options, full_system, system, dma_ports, bootmem,
 
     l2_index_start = block_size_bits + l2_bits
 
+    restore_file = discover_llc_restore_file(options)
+
     for i in range(options.num_l2caches):
         #
         # First create the Ruby objects associated with this cpu
@@ -144,8 +184,17 @@ def create_system(options, full_system, system, dma_ports, bootmem,
                                    "ruby_l2cache{}_dump.txt".format(i),
                                ))
 
-        l2_cntrl = L2Cache_Controller(version = i,
+        l2_cntrl = L2Cache_Controller(
+                                      version = i,
                                       L2cache = l2_cache,
+                                      restore_llc_state=(
+                                          i == 0 and bool(restore_file)
+                                      ),
+                                      llc_restore_file=(
+                                          restore_file
+                                          if i == 0 and restore_file
+                                          else ""
+                                      ),
                                       transitions_per_cycle = options.ports,
                                       ruby_system = ruby_system)
 
