@@ -166,6 +166,11 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     l2_index_start = block_size_bits + l2_bits
 
     restore_file = discover_llc_restore_file(options)
+    if restore_file and options.num_l2caches != 1:
+        fatal(
+            "--restore-llc-state currently supports only --num-l2caches=1; "
+            "got %d L2 caches." % options.num_l2caches
+        )
 
     for i in range(options.num_l2caches):
         #
