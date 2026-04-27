@@ -74,6 +74,12 @@ def define_options(parser):
             "Restore LLC warm-state lines discovered from checkpoint "
             "metadata if available"
         ))
+    parser.add_argument(
+        "--restore-l1d-state", action="store_true", default=False,
+        help=(
+            "Restore private L1D warm-state lines discovered from checkpoint "
+            "metadata if available"
+        ))
 
     # Options related to cache structure
     parser.add_argument(
