@@ -273,7 +273,7 @@ machine(MachineType:L1Cache, "MESI Directory L1 Cache CMP")
     }
   }
 
-  void preloadWarmL1DLine(Addr addr) {
+  void preloadWarmL1DLine(Addr addr, State state) {
     Entry cache_entry := getL1DCacheEntry(addr);
     if (is_invalid(cache_entry)) {
       cache_entry := static_cast(Entry, "pointer",
@@ -284,14 +284,22 @@ machine(MachineType:L1Cache, "MESI Directory L1 Cache CMP")
     readDataFromMemory(addr, cache_entry.DataBlk);
     cache_entry.Dirty := false;
     cache_entry.isPrefetch := false;
-    cache_entry.CacheState := State:M;
-    setAccessPermission(cache_entry, addr, State:M);
+    cache_entry.CacheState := state;
+    setAccessPermission(cache_entry, addr, state);
     L1Dcache.setMRU(addr);
     L1Dcache.markCheckpointLoad(addr);
   }
 
   void applyWarmLineAddr(Addr addr) {
-    preloadWarmL1DLine(makeLineAddress(addr));
+    preloadWarmL1DLine(makeLineAddress(addr), State:M);
+  }
+
+  void applyWarmLineState(Addr addr, std::string warm_state) {
+    if (warm_state == "S") {
+      preloadWarmL1DLine(makeLineAddress(addr), State:S);
+    } else {
+      preloadWarmL1DLine(makeLineAddress(addr), State:M);
+    }
   }
 
   void startupWarmState() {
