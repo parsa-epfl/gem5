@@ -293,7 +293,6 @@ machine(MachineType:L1Cache, "MESI Directory L1 Cache CMP")
     L1Icache.setMRU(addr);
     L1Icache.markCheckpointLoad(addr);
   }
-
   void preloadWarmL1DLine(Addr addr, State state) {
     Entry cache_entry := getL1DCacheEntry(addr);
     if (is_invalid(cache_entry)) {
