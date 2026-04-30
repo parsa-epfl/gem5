@@ -29,6 +29,8 @@
 #ifndef __CPU_PRED_BTB_HH__
 #define __CPU_PRED_BTB_HH__
 
+#include <vector>
+
 #include "arch/pcstate.hh"
 #include "base/logging.hh"
 #include "base/types.hh"
@@ -99,9 +101,11 @@ class DefaultBTB
      *  @param numEntries Number of entries for the BTB.
      *  @param tagBits Number of bits for each tag in the BTB.
      *  @param instShiftAmt Offset amount for instructions to ignore alignment.
+     *  @param numWays Number of ways per set.
      */
     DefaultBTB(unsigned numEntries, unsigned tagBits,
-               unsigned instShiftAmt, unsigned numThreads);
+               unsigned instShiftAmt, unsigned numWays,
+               unsigned numThreads);
 
     void reset();
 
@@ -152,32 +156,50 @@ class DefaultBTB
                 BTBFillSource source = BTBFillSource::ResolveControl);
 
     // Nayana added
-    void update(Addr instPC, const StaticInstPtr &staticBranchInst, 
+    void update(Addr instPC, const StaticInstPtr &staticBranchInst,
                 const TheISA::PCState &branch,
-                const uint64_t bblSize, const TheISA::PCState &target, 
+                const uint64_t bblSize, const TheISA::PCState &target,
                 const TheISA::PCState &ft, bool uncond, ThreadID tid,
                 BTBFillSource source);
 
   private:
-    /** Returns the index into the BTB, based on the branch's PC.
+    /** Returns the set index into the BTB, based on the branch's PC.
      *  @param inst_PC The branch to look up.
-     *  @return Returns the index into the BTB.
+     *  @return Returns the set index into the BTB.
      */
-    inline unsigned getIndex(Addr instPC, ThreadID tid);
+    inline unsigned getIndex(Addr instPC, ThreadID tid) const;
+
+    /** Returns the flat index into the BTB for a set/way pair. */
+    inline unsigned getEntryIndex(unsigned set, unsigned way) const;
 
     /** Returns the tag bits of a given address.
      *  @param inst_PC The branch's address.
      *  @return Returns the tag bits.
      */
-    inline Addr getTag(Addr instPC);
+    inline Addr getTag(Addr instPC) const;
 
-    /** The actual BTB. */
+    int findWay(Addr instPC, ThreadID tid) const;
+    int findWay(unsigned set, Addr tag, ThreadID tid) const;
+    unsigned chooseWay(unsigned set);
+    const BTBEntry *findEntry(Addr instPC, ThreadID tid) const;
+    BTBEntry *findEntry(Addr instPC, ThreadID tid);
+
+    /** The actual BTB, flattened as contiguous sets of ways. */
     std::vector<BTBEntry> btb;
 
-    /** The number of entries in the BTB. */
+    /** Per-set round-robin replacement pointer. */
+    std::vector<unsigned> nextReplaceWay;
+
+    /** The total number of entries in the BTB. */
     unsigned numEntries;
 
-    /** The index mask. */
+    /** Ways per set. */
+    unsigned numWays;
+
+    /** Number of sets in the BTB. */
+    unsigned numSets;
+
+    /** The set index mask. */
     unsigned idxMask;
 
     /** The number of tag bits per entry. */

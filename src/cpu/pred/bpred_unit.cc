@@ -192,6 +192,7 @@ BPredUnit::BPredUnit(const Params &params)
       BTB(params.BTBEntries,
           params.BTBTagSize,
           params.instShiftAmt,
+          params.BTBWays,
           params.numThreads),
       RAS(numThreads),
       iPred(params.indirectBranchPred),
