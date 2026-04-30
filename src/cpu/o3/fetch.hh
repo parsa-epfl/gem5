@@ -610,6 +610,8 @@ class Fetch
 
     /** Set to true if a pipelined I-cache request should be issued. */
     bool issuePipelinedIfetch[MaxThreads];
+    /** One-shot latch to predecode the recovered line after fallback. */
+    bool pendingPredecodeRecovery[MaxThreads];
     /** Last basic-block BTB probe result seen by each thread. */
     char lastBblProbeResult[MaxThreads];
 

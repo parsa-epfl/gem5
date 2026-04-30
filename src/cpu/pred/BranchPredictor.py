@@ -74,6 +74,7 @@ class BranchPredictor(SimObject):
 
     numThreads = Param.Unsigned(Parent.numThreads, "Number of threads")
     BTBEntries = Param.Unsigned(65536, "Number of BTB entries")
+    BTBWays = Param.Unsigned(4, "Number of BTB ways")
     #BTBTagSize = Param.Unsigned(16, "Size of the BTB tags, in bits")
     BTBTagSize = Param.Unsigned(46, "Size of the BTB tags, in bits")
     restoreBTBState = Param.Bool(

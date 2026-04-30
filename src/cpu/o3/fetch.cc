@@ -205,6 +205,7 @@ Fetch::Fetch(CPU *_cpu, const O3CPUParams &params)
         fetchBufferValid[i].clear();
         lastIcacheStall[i] = 0;
         issuePipelinedIfetch[i] = false;
+        pendingPredecodeRecovery[i] = false;
         lastBblProbeResult[i] = '-';
         seq[i] = 1;
         brseq[i] = 0;
@@ -430,6 +431,7 @@ Fetch::clearStates(ThreadID tid)
     prefetchQueueBr[tid].clear();
     prefetchBufferPC[tid].clear();
     prefetchBufferActualPC[tid].clear();
+    pendingPredecodeRecovery[tid] = false;
     lastProcessedLine = 0;
     lastAddrFetched = 0;
     // TODO not sure what to do with priorityList for now
@@ -458,6 +460,7 @@ Fetch::resetStage()
         lastinst[tid] = 0;
         fetchOffset[tid] = 0;
         macroop[tid] = NULL;
+        pendingPredecodeRecovery[tid] = false;
 
         delayedCommit[tid] = false;
         //memReq[tid] = NULL;
@@ -951,28 +954,97 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
         inst->pcState().instAddr() == 0xffff800008198644 ||
         inst->pcState().instAddr() == 0xffff800008198698 ||
         inst->pcState().instAddr() == 0xffff8000081985b0 ||
-        inst->pcState().instAddr() == 0xaaaadebf0c68ULL ||
-        inst->pcState().instAddr() == 0xaaaadebf0c6cULL ||
-        inst->pcState().instAddr() == 0xaaaadebf0d08ULL ||
+        inst->pcState().instAddr() == 0xffff800008a3fca0ULL ||
+        inst->pcState().instAddr() == 0xffff800008a3fcb4ULL ||
+        inst->pcState().instAddr() == 0xffff8000080116d8ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf20d4ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf20d8ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf216cULL ||
+        inst->pcState().instAddr() == 0xaaaadebf2170ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf2178ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf2184ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf219cULL ||
+        inst->pcState().instAddr() == 0xaaaadebf0e40ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf0e48ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf0f3cULL ||
+        inst->pcState().instAddr() == 0xaaaadebf0f40ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf0c00ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf0c08ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf0c14ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf0c1cULL ||
+        inst->pcState().instAddr() == 0xaaaadebf1bb0ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf1bbcULL ||
+        inst->pcState().instAddr() == 0xaaaadebf1c04ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf1c18ULL ||
         bblAddr[tid] == 0xffff800008198640 ||
         bblAddr[tid] == 0xffff80000819868c ||
         bblAddr[tid] == 0xffff8000081985ac ||
-        bblAddr[tid] == 0xaaaadebf0c68ULL ||
-        bblAddr[tid] == 0xaaaadebf0cfcULL;
+        bblAddr[tid] == 0xffff800008a3fca0ULL ||
+        bblAddr[tid] == 0xffff8000080116d8ULL ||
+        bblAddr[tid] == 0xaaaadebf20d4ULL ||
+        bblAddr[tid] == 0xaaaadebf2150ULL ||
+        bblAddr[tid] == 0xaaaadebf2170ULL ||
+        bblAddr[tid] == 0xaaaadebf2184ULL ||
+        bblAddr[tid] == 0xaaaadebf0e40ULL ||
+        bblAddr[tid] == 0xaaaadebf0f3cULL ||
+        bblAddr[tid] == 0xaaaadebf0c00ULL ||
+        bblAddr[tid] == 0xaaaadebf0c14ULL ||
+        bblAddr[tid] == 0xaaaadebf1bb0ULL ||
+        bblAddr[tid] == 0xaaaadebf1c04ULL;
     const bool trackChainCase =
         inst->pcState().instAddr() == 0xffff80000811081cULL ||
         inst->pcState().instAddr() == 0xffff800008110644ULL ||
-        inst->pcState().instAddr() == 0xaaaadebf0d08ULL ||
-        inst->pcState().instAddr() == 0xaaaadebf0c6cULL ||
+        inst->pcState().instAddr() == 0xffff800008a3fcb4ULL ||
+        inst->pcState().instAddr() == 0xffff8000080116d8ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf216cULL ||
+        inst->pcState().instAddr() == 0xaaaadebf2178ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf219cULL ||
+        inst->pcState().instAddr() == 0xaaaadebf20d8ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf0e48ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf0f40ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf0c08ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf0c1cULL ||
+        inst->pcState().instAddr() == 0xaaaadebf1bbcULL ||
+        inst->pcState().instAddr() == 0xaaaadebf1c18ULL ||
         bblAddr[tid] == 0xffff800008110808ULL ||
         bblAddr[tid] == 0xffff800008110638ULL ||
-        bblAddr[tid] == 0xaaaadebf0cfcULL ||
-        bblAddr[tid] == 0xaaaadebf0c68ULL ||
+        bblAddr[tid] == 0xffff800008a3fca0ULL ||
+        bblAddr[tid] == 0xffff8000080116d8ULL ||
+        bblAddr[tid] == 0xaaaadebf2150ULL ||
+        bblAddr[tid] == 0xaaaadebf2170ULL ||
+        bblAddr[tid] == 0xaaaadebf2184ULL ||
+        bblAddr[tid] == 0xaaaadebf20d4ULL ||
+        bblAddr[tid] == 0xaaaadebf0e40ULL ||
+        bblAddr[tid] == 0xaaaadebf0f3cULL ||
+        bblAddr[tid] == 0xaaaadebf0c00ULL ||
+        bblAddr[tid] == 0xaaaadebf0c14ULL ||
+        bblAddr[tid] == 0xaaaadebf1bb0ULL ||
+        bblAddr[tid] == 0xaaaadebf1c04ULL ||
         (!prefetchQueue[tid].empty() &&
          (prefetchQueue[tid].front().instAddr() == 0xffff800008110638ULL ||
           prefetchQueueBr[tid].front().instAddr() == 0xffff80000811081cULL ||
-          prefetchQueue[tid].front().instAddr() == 0xaaaadebf0c68ULL ||
-          prefetchQueueBr[tid].front().instAddr() == 0xaaaadebf0d08ULL));
+          prefetchQueue[tid].front().instAddr() == 0xffff8000080116d8ULL ||
+          prefetchQueueBr[tid].front().instAddr() == 0xffff800008a3fcb4ULL ||
+          prefetchQueue[tid].front().instAddr() == 0xaaaadebf20d4ULL ||
+          prefetchQueue[tid].front().instAddr() == 0xaaaadebf2150ULL ||
+          prefetchQueue[tid].front().instAddr() == 0xaaaadebf2170ULL ||
+          prefetchQueue[tid].front().instAddr() == 0xaaaadebf2184ULL ||
+          prefetchQueue[tid].front().instAddr() == 0xaaaadebf0e40ULL ||
+          prefetchQueue[tid].front().instAddr() == 0xaaaadebf0f3cULL ||
+          prefetchQueue[tid].front().instAddr() == 0xaaaadebf0c00ULL ||
+          prefetchQueue[tid].front().instAddr() == 0xaaaadebf0c14ULL ||
+          prefetchQueue[tid].front().instAddr() == 0xaaaadebf1bb0ULL ||
+          prefetchQueue[tid].front().instAddr() == 0xaaaadebf1c04ULL ||
+          prefetchQueueBr[tid].front().instAddr() == 0xaaaadebf216cULL ||
+          prefetchQueueBr[tid].front().instAddr() == 0xaaaadebf2178ULL ||
+          prefetchQueueBr[tid].front().instAddr() == 0xaaaadebf219cULL ||
+          prefetchQueueBr[tid].front().instAddr() == 0xaaaadebf20d8ULL ||
+          prefetchQueueBr[tid].front().instAddr() == 0xaaaadebf0e48ULL ||
+          prefetchQueueBr[tid].front().instAddr() == 0xaaaadebf0f40ULL ||
+          prefetchQueueBr[tid].front().instAddr() == 0xaaaadebf0c08ULL ||
+          prefetchQueueBr[tid].front().instAddr() == 0xaaaadebf0c1cULL ||
+          prefetchQueueBr[tid].front().instAddr() == 0xaaaadebf1bbcULL ||
+          prefetchQueueBr[tid].front().instAddr() == 0xaaaadebf1c18ULL));
 
     //Pre-decode branch instruction and update BTB
     if(enableFDIP){
@@ -1307,8 +1379,12 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
             fallThroughPrefPC = prefPC[tid].instAddr();
             DPRINTF(Fetch, "Setting fallThroughPrefPC %#x\n", fallThroughPrefPC);
         }
-        //lastPrefPC = prefPC[tid]; 
-        lastPrefPC = 0;
+        // Preserve the newly recovered block start so the immediate FTQ
+        // reseed can predecode the current fetched line and harvest any
+        // architected same-line BB continuations before we drift further in
+        // fallback mode.
+        lastPrefPC = prefPC[tid];
+        pendingPredecodeRecovery[tid] = true;
         prefetchQueue[tid].clear();
         prefetchQueueBblSize[tid].clear();
         prefetchQueueSeqNum[tid].clear();
@@ -1328,6 +1404,17 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
         //DPRINTF(Fetch, "Front is still not same. fetchBufferBlockPC: %#x fetchBufferPC: %#x\n", fetchBufferBlockPC, fetchBufferPC[tid].front());
         //
         //
+    }
+
+    if (enableFDIP && predictorInvoked && prefPC[tid] != 0 &&
+        prefetchQueue[tid].empty()) {
+        /*
+         * Fallback decode just recovered a real branch and produced the next
+         * architectural basic-block start. Re-seed the FTQ immediately so the
+         * very next branch in that block can be discovered through the BBL-BTB
+         * path instead of lingering in fallback mode for another branch.
+         */
+        addToFTQ();
     }
 
     //if (prefetchQueue[0].size()==0){
@@ -1788,11 +1875,29 @@ Fetch::doSquash(const TheISA::PCState &newPC, const DynInstPtr squashInst,
           case 0xffff800008197fe4ULL:
           case 0xffff800008120704ULL:
           case 0xffff800008120734ULL:
-          case 0xaaaadebf0c64ULL:
-          case 0xaaaadebf0c68ULL:
-          case 0xaaaadebf0c6cULL:
-          case 0xaaaadebf0cfcULL:
-          case 0xaaaadebf0d08ULL:
+          case 0xffff800008a3fca0ULL:
+          case 0xffff800008a3fcb4ULL:
+          case 0xffff8000080116d8ULL:
+          case 0xaaaadebf0c00ULL:
+          case 0xaaaadebf0c08ULL:
+          case 0xaaaadebf0c14ULL:
+          case 0xaaaadebf0c1cULL:
+          case 0xaaaadebf1bb0ULL:
+          case 0xaaaadebf1bbcULL:
+          case 0xaaaadebf1c04ULL:
+          case 0xaaaadebf1c18ULL:
+          case 0xaaaadebf0e40ULL:
+          case 0xaaaadebf0e48ULL:
+          case 0xaaaadebf0f3cULL:
+          case 0xaaaadebf0f40ULL:
+          case 0xaaaadebf20d4ULL:
+          case 0xaaaadebf20d8ULL:
+          case 0xaaaadebf2150ULL:
+          case 0xaaaadebf216cULL:
+          case 0xaaaadebf2170ULL:
+          case 0xaaaadebf2178ULL:
+          case 0xaaaadebf2184ULL:
+          case 0xaaaadebf219cULL:
             return true;
           default:
             return false;
@@ -2423,8 +2528,18 @@ Fetch::predictNextBasicBlock(TheISA::PCState prefetchPc, TheISA::PCState &branch
     const bool trackChainCase =
         prefetchPc.instAddr() == 0xffff800008110808ULL ||
         prefetchPc.instAddr() == 0xffff800008110638ULL ||
-        prefetchPc.instAddr() == 0xaaaadebf0cfcULL ||
-        prefetchPc.instAddr() == 0xaaaadebf0c68ULL;
+        prefetchPc.instAddr() == 0xffff800008a3fca0ULL ||
+        prefetchPc.instAddr() == 0xffff8000080116d8ULL ||
+        prefetchPc.instAddr() == 0xaaaadebf2150ULL ||
+        prefetchPc.instAddr() == 0xaaaadebf2170ULL ||
+        prefetchPc.instAddr() == 0xaaaadebf2184ULL ||
+        prefetchPc.instAddr() == 0xaaaadebf20d4ULL ||
+        prefetchPc.instAddr() == 0xaaaadebf0e40ULL ||
+        prefetchPc.instAddr() == 0xaaaadebf0f3cULL ||
+        prefetchPc.instAddr() == 0xaaaadebf0c00ULL ||
+        prefetchPc.instAddr() == 0xaaaadebf0c14ULL ||
+        prefetchPc.instAddr() == 0xaaaadebf1bb0ULL ||
+        prefetchPc.instAddr() == 0xaaaadebf1c04ULL;
     TheISA::PCState predictPC = prefetchPc;
     auto& btbConf = cpu->btbConfMap[prefetchPc.instAddr()];
     uint64_t &btbTotal = std::get<0>(btbConf);
@@ -2603,16 +2718,34 @@ Fetch::preDecode(){
 
     //if (fetchBufferValid[tid].size()>0 && fetchBufferValid[tid].back() && fetchBufferBlockPC == fetchBufferPC[tid].back()){
     if (fetchBufferValid[tid].size()>0 && fetchBufferValid[tid].back() && fetchBufferPC[tid].back() == prefetchBufferPC[tid].back()){
+        pendingPredecodeRecovery[tid] = false;
+
+        const Addr lineStart = fetchBufferPC[tid].back();
+        const Addr lineEnd = lineStart + CACHE_LINE_SIZE;
+        const Addr prefAddr = lastPrefPC.instAddr();
+
+        /*
+         * preDecode() only knows how to walk the latest fetched line. When
+         * fallback recovery hands us a future BBL start, keep the handoff
+         * state but wait until the matching line is actually buffered instead
+         * of indexing past the end of the current line.
+         */
+        if (prefAddr >= lineEnd) {
+            DPRINTF(Fetch, "preDecode skip: lastPrefPC %#x beyond buffered line [%#x, %#x)\n",
+                    prefAddr, lineStart, lineEnd);
+            return;
+        }
 
         TheISA::PCState thisPC = lastPrefPC;
 
-        if( lastPrefPC.instAddr() <= fetchBufferPC[tid].back()){
-            thisPC.pc(fetchBufferPC[tid].back());
-            thisPC.npc(fetchBufferPC[tid].back() + 4);
+        if (prefAddr <= lineStart) {
+            thisPC.pc(lineStart);
+            thisPC.npc(lineStart + 4);
         }
 
         thisPC.upc(0);
         thisPC.nupc(1);
+        bblPC = thisPC;
 
         Addr fetchAddr = thisPC.instAddr() & decoder[tid]->pcMask();
         Addr fetchBufferBlockPC = fetchBufferAlignPC(fetchAddr);
@@ -2624,9 +2757,9 @@ Fetch::preDecode(){
         TheISA::PCState nextPC = thisPC;;
         int pcOffset = 0;
 
-        unsigned blkOffset = (fetchAddr - fetchBufferPC[tid].back()) / instSize;
+        unsigned blkOffset = (fetchAddr - lineStart) / instSize;
         //Addr lastAddr = fetchBufferBlockPC + CACHE_LINE_SIZE;
-        Addr lastAddr = fetchBufferPC[tid].back() + CACHE_LINE_SIZE;
+        Addr lastAddr = lineEnd;
         auto *dec_ptr = preDecoder[tid];
 
         assert(blkOffset <= 16 && "blkOffset cannot be grater than CACHE_LINZE_SIZE\n");
@@ -2895,15 +3028,6 @@ Fetch::preDecodeAllLines(){
                 if (staticInst->isDirectCtrl()) {
                     DPRINTF(PreDecode, "PREDECODE BBLInsert Inserting Direct ctrl bblAddr[tid]: %#x instAddr: %#x branchTarget: %#x bblSize: %d\n",
                             bblPC.instAddr(), thisPC.instAddr(), staticInst->branchTarget(thisPC), thisPC.instAddr() - bblPC.instAddr());
-                    //branchPred->BTBUpdate(bblPC.instAddr(),
-                    //                      staticInst,
-                    //                      thisPC,
-                    //                      thisPC.instAddr() - bblPC.instAddr(),
-                    //                      staticInst->branchTarget(thisPC),
-                    //                      nextPC,
-                    //                      staticInst->isUncondCtrl(),
-                    //                      tid);
-                    //assert(thisPC.instAddr() >= bblPC.instAddr()  && "bblSize must be greater than 0");
                     bblPC = nextPC;
                 } else if(staticInst->isControl()){
                     TheISA::PCState dummyBranchTarget = nextPC;
@@ -2912,15 +3036,6 @@ Fetch::preDecodeAllLines(){
 
                     DPRINTF(PreDecode, "PREDECODE BBLInsert Inserting Indirect ctrl bblAddr[tid]: %#x instAddr: %#x branchTarget: %#x bblSize: %d\n",
                             bblPC.instAddr(), thisPC.instAddr(), dummyBranchTarget, thisPC.instAddr() - bblPC.instAddr());
-                    //branchPred->BTBUpdate(bblPC.instAddr(),
-                    //                      staticInst,
-                    //                      thisPC,
-                    //                      thisPC.instAddr() - bblPC.instAddr(),
-                    //                      dummyBranchTarget,
-                    //                      nextPC,
-                    //                      staticInst->isUncondCtrl(),
-                    //                      tid);
-                    //assert(thisPC.instAddr() >= bblPC.instAddr()  && "bblSize must be greater than 0");
                     bblPC = nextPC;
                 }
 
@@ -2968,13 +3083,15 @@ Fetch::addToFTQ()
     if (prefPC[tid].instAddr() < 0x10){
         return;
     }
-    // Keep BTB learning tied to architecturally encountered branch
-    // instructions during fetch/execute rather than bulk predecoding whole
-    // fetched lines ahead of the first branch appearance. This keeps BTB
-    // restoration experiments from being warmed by line-level decode.
-    //assert(prefPC[tid].instAddr() != 0 && "prefPC cannot be 0\n");
-    preDecodeAllLines();
-    //preDecode();
+    /*
+     * Only predecode as a one-shot recovery step after fallback decode
+     * rediscovers a real branch. Running predecode on every FTQ activity is
+     * too aggressive and pollutes the BTB with line-walk artifacts instead of
+     * just harvesting the recovered line back into BBL mode.
+     */
+    if (pendingPredecodeRecovery[tid]) {
+        preDecode();
+    }
     // The current Prefetch PC.
     TheISA::PCState thisPC = prefPC[tid];
     TheISA::PCState nextPC = thisPC;
@@ -2993,14 +3110,44 @@ Fetch::addToFTQ()
         const bool trackChainCase =
             thisPC.instAddr() == 0xffff800008110808ULL ||
             thisPC.instAddr() == 0xffff800008110638ULL ||
-            thisPC.instAddr() == 0xaaaadebf0cfcULL ||
-            thisPC.instAddr() == 0xaaaadebf0c68ULL ||
+            thisPC.instAddr() == 0xffff800008a3fca0ULL ||
+            thisPC.instAddr() == 0xffff8000080116d8ULL ||
+            thisPC.instAddr() == 0xaaaadebf2150ULL ||
+            thisPC.instAddr() == 0xaaaadebf2170ULL ||
+            thisPC.instAddr() == 0xaaaadebf2184ULL ||
+            thisPC.instAddr() == 0xaaaadebf20d4ULL ||
+            thisPC.instAddr() == 0xaaaadebf0e40ULL ||
+            thisPC.instAddr() == 0xaaaadebf0f3cULL ||
+            thisPC.instAddr() == 0xaaaadebf0c00ULL ||
+            thisPC.instAddr() == 0xaaaadebf0c14ULL ||
+            thisPC.instAddr() == 0xaaaadebf1bb0ULL ||
+            thisPC.instAddr() == 0xaaaadebf1c04ULL ||
             branchPC.instAddr() == 0xffff80000811081cULL ||
             branchPC.instAddr() == 0xffff800008110644ULL ||
-            branchPC.instAddr() == 0xaaaadebf0d08ULL ||
-            branchPC.instAddr() == 0xaaaadebf0c6cULL ||
+            branchPC.instAddr() == 0xffff800008a3fcb4ULL ||
+            branchPC.instAddr() == 0xffff8000080116d8ULL ||
+            branchPC.instAddr() == 0xaaaadebf216cULL ||
+            branchPC.instAddr() == 0xaaaadebf2178ULL ||
+            branchPC.instAddr() == 0xaaaadebf219cULL ||
+            branchPC.instAddr() == 0xaaaadebf20d8ULL ||
+            branchPC.instAddr() == 0xaaaadebf0e48ULL ||
+            branchPC.instAddr() == 0xaaaadebf0f40ULL ||
+            branchPC.instAddr() == 0xaaaadebf0c08ULL ||
+            branchPC.instAddr() == 0xaaaadebf0c1cULL ||
+            branchPC.instAddr() == 0xaaaadebf1bbcULL ||
+            branchPC.instAddr() == 0xaaaadebf1c18ULL ||
             nextPC.instAddr() == 0xffff800008110638ULL ||
-            nextPC.instAddr() == 0xaaaadebf0c68ULL;
+            nextPC.instAddr() == 0xffff8000080116d8ULL ||
+            nextPC.instAddr() == 0xaaaadebf2150ULL ||
+            nextPC.instAddr() == 0xaaaadebf2170ULL ||
+            nextPC.instAddr() == 0xaaaadebf2184ULL ||
+            nextPC.instAddr() == 0xaaaadebf20d4ULL ||
+            nextPC.instAddr() == 0xaaaadebf0c00ULL ||
+            nextPC.instAddr() == 0xaaaadebf0c14ULL ||
+            nextPC.instAddr() == 0xaaaadebf1bb0ULL ||
+            nextPC.instAddr() == 0xaaaadebf1c04ULL ||
+            nextPC.instAddr() == 0xaaaadebf0e40ULL ||
+            nextPC.instAddr() == 0xaaaadebf0f3cULL;
         if(limitReached){
             return;
         }
@@ -3353,11 +3500,29 @@ Fetch::fetch(bool &status_change)
     auto shouldTraceUserDecode =
         [&](Addr pc) {
             switch (pc) {
-              case 0xaaaadebf0c64ULL:
-              case 0xaaaadebf0c68ULL:
-              case 0xaaaadebf0c6cULL:
-              case 0xaaaadebf0cfcULL:
-              case 0xaaaadebf0d08ULL:
+              case 0xaaaadebf0c00ULL:
+              case 0xaaaadebf0c08ULL:
+              case 0xaaaadebf0c14ULL:
+              case 0xaaaadebf0c1cULL:
+              case 0xaaaadebf1bb0ULL:
+              case 0xaaaadebf1bbcULL:
+              case 0xaaaadebf1c04ULL:
+              case 0xaaaadebf1c18ULL:
+              case 0xaaaadebf20d4ULL:
+              case 0xaaaadebf20d8ULL:
+              case 0xaaaadebf2150ULL:
+              case 0xaaaadebf216cULL:
+              case 0xaaaadebf2170ULL:
+              case 0xaaaadebf2178ULL:
+              case 0xaaaadebf2184ULL:
+              case 0xaaaadebf219cULL:
+              case 0xaaaadebf0e40ULL:
+              case 0xaaaadebf0e48ULL:
+              case 0xaaaadebf0f3cULL:
+              case 0xaaaadebf0f40ULL:
+              case 0xffff800008a3fca0ULL:
+              case 0xffff800008a3fcb4ULL:
+              case 0xffff8000080116d8ULL:
                 return true;
               default:
                 return false;
