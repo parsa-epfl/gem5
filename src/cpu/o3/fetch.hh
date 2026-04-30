@@ -610,6 +610,8 @@ class Fetch
 
     /** Set to true if a pipelined I-cache request should be issued. */
     bool issuePipelinedIfetch[MaxThreads];
+    /** Last basic-block BTB probe result seen by each thread. */
+    char lastBblProbeResult[MaxThreads];
 
     /** Event used to delay fault generation of translation faults */
     FinishTranslationEvent finishTranslationEvent;

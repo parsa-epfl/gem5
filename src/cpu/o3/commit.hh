@@ -41,6 +41,7 @@
 #ifndef __CPU_O3_COMMIT_HH__
 #define __CPU_O3_COMMIT_HH__
 
+#include <iosfwd>
 #include <queue>
 
 #include "base/statistics.hh"
@@ -355,6 +356,10 @@ class Commit
     /** Pointer to O3CPU. */
     CPU *cpu;
 
+    /** Optional per-core branch trace stream for committed control flow. */
+    bool branchTraceEnable;
+    std::ostream *branchTraceStream;
+
     /** Vector of all of the threads. */
     std::vector<ThreadState *> thread;
 
@@ -543,6 +548,21 @@ class Commit
         statistics::Vector functionCalls;
         /** Committed instructions by instruction type (OpClass) */
         statistics::Vector2d committedInstType;
+
+        /** Direct branches whose resolved PC state transfers control and BTB was not consulted. */
+        statistics::Scalar directControlTransferBTBNotConsulted;
+        /** Direct branches whose resolved PC state transfers control and BTB was consulted and missed. */
+        statistics::Scalar directControlTransferBTBMiss;
+        /** Direct branches whose resolved PC state transfers control and BTB hit due to FetchDirect fill. */
+        statistics::Scalar directControlTransferBTBHitFetchDirect;
+        /** Direct branches whose resolved PC state transfers control and BTB hit due to FetchNondirect fill. */
+        statistics::Scalar directControlTransferBTBHitFetchNondirect;
+        /** Direct branches whose resolved PC state transfers control and BTB hit due to PredecodeDirect fill. */
+        statistics::Scalar directControlTransferBTBHitPredecodeDirect;
+        /** Direct branches whose resolved PC state transfers control and BTB hit due to ResolveControl fill. */
+        statistics::Scalar directControlTransferBTBHitResolveControl;
+        /** Direct branches whose resolved PC state transfers control and BTB hit due to Restore fill. */
+        statistics::Scalar directControlTransferBTBHitRestore;
 
         /** Number of cycles where the commit bandwidth limit is reached. */
         statistics::Scalar commitEligibleSamples;

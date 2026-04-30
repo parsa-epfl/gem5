@@ -57,6 +57,7 @@
 #include "cpu/o3/limits.hh"
 #include "cpu/o3/thread_state.hh"
 #include "cpu/timebuf.hh"
+#include "base/output.hh"
 #include "debug/Activity.hh"
 #include "debug/Commit.hh"
 #include "debug/CommitRate.hh"
@@ -90,6 +91,8 @@ Commit::processTrapEvent(ThreadID tid)
 Commit::Commit(CPU *_cpu, const O3CPUParams &params)
     : commitPolicy(params.smtCommitPolicy),
       cpu(_cpu),
+      branchTraceEnable(params.branch_trace_enable),
+      branchTraceStream(nullptr),
       iewToCommitDelay(params.iewToCommitDelay),
       commitToIEWDelay(params.commitToIEWDelay),
       renameToROBDelay(params.renameToROBDelay),
@@ -119,6 +122,12 @@ Commit::Commit(CPU *_cpu, const O3CPUParams &params)
 
     _status = Active;
     _nextStatus = Inactive;
+
+    if (branchTraceEnable) {
+        const std::string fname = csprintf(
+            "branch_trace_core_%d.log", cpu->cpuId());
+        branchTraceStream = simout.findOrCreate(fname)->stream();
+    }
 
     if (commitPolicy == CommitPolicy::RoundRobin) {
         //Set-Up Priority List
@@ -209,6 +218,20 @@ Commit::CommitStats::CommitStats(CPU *cpu, Commit *commit)
                "Number of function calls committed."),
       ADD_STAT(committedInstType, statistics::units::Count::get(),
                "Class of committed instruction"),
+      ADD_STAT(directControlTransferBTBNotConsulted, statistics::units::Count::get(),
+               "Number of committed direct branches whose resolved PC state transfers control and bypassed BTB consultation."),
+      ADD_STAT(directControlTransferBTBMiss, statistics::units::Count::get(),
+               "Number of committed direct branches whose resolved PC state transfers control and whose BTB consult missed."),
+      ADD_STAT(directControlTransferBTBHitFetchDirect, statistics::units::Count::get(),
+               "Number of committed direct branches whose resolved PC state transfers control and whose BTB hit came from FetchDirect fill."),
+      ADD_STAT(directControlTransferBTBHitFetchNondirect, statistics::units::Count::get(),
+               "Number of committed direct branches whose resolved PC state transfers control and whose BTB hit came from FetchNondirect fill."),
+      ADD_STAT(directControlTransferBTBHitPredecodeDirect, statistics::units::Count::get(),
+               "Number of committed direct branches whose resolved PC state transfers control and whose BTB hit came from PredecodeDirect fill."),
+      ADD_STAT(directControlTransferBTBHitResolveControl, statistics::units::Count::get(),
+               "Number of committed direct branches whose resolved PC state transfers control and whose BTB hit came from ResolveControl fill."),
+      ADD_STAT(directControlTransferBTBHitRestore, statistics::units::Count::get(),
+               "Number of committed direct branches whose resolved PC state transfers control and whose BTB hit came from Restore fill."),
       ADD_STAT(commitEligibleSamples, statistics::units::Cycle::get(),
                "number cycles where commit BW limit reached")
 {
@@ -277,6 +300,14 @@ Commit::CommitStats::CommitStats(CPU *cpu, Commit *commit)
     functionCalls
         .init(commit->numThreads)
         .flags(total);
+
+    directControlTransferBTBNotConsulted.prereq(directControlTransferBTBNotConsulted);
+    directControlTransferBTBMiss.prereq(directControlTransferBTBMiss);
+    directControlTransferBTBHitFetchDirect.prereq(directControlTransferBTBHitFetchDirect);
+    directControlTransferBTBHitFetchNondirect.prereq(directControlTransferBTBHitFetchNondirect);
+    directControlTransferBTBHitPredecodeDirect.prereq(directControlTransferBTBHitPredecodeDirect);
+    directControlTransferBTBHitResolveControl.prereq(directControlTransferBTBHitResolveControl);
+    directControlTransferBTBHitRestore.prereq(directControlTransferBTBHitRestore);
 
     committedInstType
         .init(commit->numThreads,enums::Num_OpClass)
@@ -1473,10 +1504,68 @@ Commit::commitHead(const DynInstPtr &head_inst, unsigned inst_num)
     }
 
     if(head_inst->isControl()){
-        DPRINTFR(MispredCommTrace, "%llu %llu 0x%llx %c %c %c %llu\n",
+        const char resolvedControlTransfer =
+            head_inst->pcState().branching() ? 'T' : 'N';
+        const char btbState = !head_inst->isBTBConsulted ? 'N' :
+            (head_inst->isBTBMiss ? 'M' : 'H');
+        const char btbSource =
+            branch_prediction::btbFillSourceTraceChar(head_inst->btbFillSource);
+        const char frontendPath = head_inst->frontendPath;
+        const char bblProbe = head_inst->bblProbe;
+        if (head_inst->isDirectCtrl() && resolvedControlTransfer == 'T') {
+            if (!head_inst->isBTBConsulted) {
+                ++stats.directControlTransferBTBNotConsulted;
+            } else if (head_inst->isBTBMiss) {
+                ++stats.directControlTransferBTBMiss;
+            } else {
+                switch (head_inst->btbFillSource) {
+                  case branch_prediction::BTBFillSource::FetchDirect:
+                    ++stats.directControlTransferBTBHitFetchDirect;
+                    break;
+                  case branch_prediction::BTBFillSource::FetchNondirect:
+                    ++stats.directControlTransferBTBHitFetchNondirect;
+                    break;
+                  case branch_prediction::BTBFillSource::PredecodeDirect:
+                    ++stats.directControlTransferBTBHitPredecodeDirect;
+                    break;
+                  case branch_prediction::BTBFillSource::ResolveControl:
+                    ++stats.directControlTransferBTBHitResolveControl;
+                    break;
+                  case branch_prediction::BTBFillSource::Restore:
+                    ++stats.directControlTransferBTBHitRestore;
+                    break;
+                  case branch_prediction::BTBFillSource::None:
+                    break;
+                }
+            }
+        }
+        if (branchTraceEnable && branchTraceStream) {
+            (*branchTraceStream)
+                << head_inst->seqNum << ' '
+                << instCount << ' '
+                << "0x" << std::hex << head_inst->instAddr() << std::dec << ' '
+                << resolvedControlTransfer << ' '
+                << (head_inst->mispredicted() ? 'T' : 'F') << ' '
+                << btbState << ' '
+                << btbSource << ' '
+                << frontendPath << ' '
+                << bblProbe << ' '
+                << (head_inst->isIndirectCtrl() ? 'I' : 'D') << ' '
+#if THE_ISA == ARM_ISA
+                << thread[tid]->getTC()->readMiscReg(ArmISA::MISCREG_TPIDR_EL0)
+#else
+                << 0
+#endif
+                << '\n';
+        }
+        DPRINTFR(MispredCommTrace, "%llu %llu 0x%llx %c %c %c %c %c %c %c %llu\n",
                 head_inst->seqNum, instCount, head_inst->instAddr(), 
+                resolvedControlTransfer,
                 head_inst->mispredicted() ? 'T': 'F',
-                head_inst->isBTBMiss ? 'M' : 'H',
+                btbState,
+                btbSource,
+                frontendPath,
+                bblProbe,
                 head_inst->isIndirectCtrl()? 'I' : 'D',
 #if THE_ISA == ARM_ISA
                 thread[tid]->getTC()->readMiscReg(ArmISA::MISCREG_TPIDR_EL0)

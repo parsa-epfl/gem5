@@ -205,6 +205,7 @@ Fetch::Fetch(CPU *_cpu, const O3CPUParams &params)
         fetchBufferValid[i].clear();
         lastIcacheStall[i] = 0;
         issuePipelinedIfetch[i] = false;
+        lastBblProbeResult[i] = '-';
         seq[i] = 1;
         brseq[i] = 0;
     }
@@ -908,6 +909,7 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
     ThreadID tid = inst->threadNumber;
     TheISA::PCState thisPC = nextPC;
     TheISA::PCState ftPC = nextPC;
+    const Addr currentBblAddr = bblAddr[tid];
     inst->staticInst->advancePC(ftPC);
 
     // The next PC to access.
@@ -938,10 +940,73 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
     bool predict_taken;
     TheISA::PCState branchPC, tempPC;
     bool predictorInvoked = false;
+    char frontendPath = '-';
+    const char rawBblProbe = lastBblProbeResult[tid];
+    char effectiveBblProbe = rawBblProbe;
+    const bool archBtbEligibleControl = inst->isControl() && !inst->isMicroop();
+    const bool queuedChainContinuation =
+        !prefetchQueue[tid].empty() &&
+        inst->instAddr() < prefetchQueueBr[tid].front().instAddr();
+    const bool trackControlCase =
+        inst->pcState().instAddr() == 0xffff800008198644 ||
+        inst->pcState().instAddr() == 0xffff800008198698 ||
+        inst->pcState().instAddr() == 0xffff8000081985b0 ||
+        inst->pcState().instAddr() == 0xaaaadebf0c68ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf0c6cULL ||
+        inst->pcState().instAddr() == 0xaaaadebf0d08ULL ||
+        bblAddr[tid] == 0xffff800008198640 ||
+        bblAddr[tid] == 0xffff80000819868c ||
+        bblAddr[tid] == 0xffff8000081985ac ||
+        bblAddr[tid] == 0xaaaadebf0c68ULL ||
+        bblAddr[tid] == 0xaaaadebf0cfcULL;
+    const bool trackChainCase =
+        inst->pcState().instAddr() == 0xffff80000811081cULL ||
+        inst->pcState().instAddr() == 0xffff800008110644ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf0d08ULL ||
+        inst->pcState().instAddr() == 0xaaaadebf0c6cULL ||
+        bblAddr[tid] == 0xffff800008110808ULL ||
+        bblAddr[tid] == 0xffff800008110638ULL ||
+        bblAddr[tid] == 0xaaaadebf0cfcULL ||
+        bblAddr[tid] == 0xaaaadebf0c68ULL ||
+        (!prefetchQueue[tid].empty() &&
+         (prefetchQueue[tid].front().instAddr() == 0xffff800008110638ULL ||
+          prefetchQueueBr[tid].front().instAddr() == 0xffff80000811081cULL ||
+          prefetchQueue[tid].front().instAddr() == 0xaaaadebf0c68ULL ||
+          prefetchQueueBr[tid].front().instAddr() == 0xaaaadebf0d08ULL));
 
     //Pre-decode branch instruction and update BTB
     if(enableFDIP){
-        if (inst->isDirectCtrl() && bblAddr[tid] != 0) {
+        if (!queuedChainContinuation &&
+            archBtbEligibleControl && inst->isDirectCtrl() &&
+            bblAddr[tid] != 0) {
+            if (trackControlCase) {
+                warn("TRACKED_FETCH direct insert pre-predict pc=%#x upc=%u "
+                     "npc=%#x bblAddr=%#x bblSize=%u target=%#x ft=%#x "
+                     "ctrl=%d direct=%d cond=%d uncond=%d call=%d ret=%d "
+                     "micro=%d first=%d last=%d macroop=%p staticInst=%p "
+                     "disasm=%s prefetchEmpty=%d lastBblProbe=%c",
+                     inst->pcState().instAddr(),
+                     inst->pcState().microPC(),
+                     inst->pcState().nextInstAddr(),
+                     bblAddr[tid],
+                     bblSize[tid],
+                     inst->branchTarget(),
+                     ftPC.instAddr(),
+                     inst->isControl(),
+                     inst->isDirectCtrl(),
+                     inst->isCondCtrl(),
+                     inst->isUncondCtrl(),
+                     inst->isCall(),
+                     inst->isReturn(),
+                     inst->isMicroop(),
+                     inst->isFirstMicroop(),
+                     inst->isLastMicroop(),
+                     inst->macroop ? &*inst->macroop : nullptr,
+                     inst->staticInst ? &*inst->staticInst : nullptr,
+                     inst->staticInst ? inst->staticInst->disassemble(inst->pcState().instAddr()) : "<null>",
+                     prefetchQueue[tid].empty(),
+                     rawBblProbe);
+            }
             DPRINTF(Bgodala, "BBLInsert Inserting bblAddr[tid]: %#x instAddr: %#x branchTarget: %#x bblSize: %d diff: %d\n",
                     bblAddr[tid], inst->pcState().instAddr(), inst->branchTarget(), bblSize[tid], inst->pcState().instAddr() - bblAddr[tid]);
             assert(((inst->pcState().instAddr() - bblAddr[tid]) == bblSize[tid]) && "BBLInsert Mismatch" );
@@ -952,12 +1017,41 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
                                   inst->branchTarget(),
                                   ftPC,
                                   inst->isUncondCtrl(),
-                                  tid);
+                                  tid,
+                                  branch_prediction::BTBFillSource::FetchDirect);
         }
-        else if (inst->isControl() && bblAddr[tid] != 0) {
+        else if (!queuedChainContinuation &&
+                 archBtbEligibleControl && bblAddr[tid] != 0) {
             TheISA::PCState dummyBranchTarget = ftPC;
             //dummyBranchTarget.pc(-1);
             //dummyBranchTarget.npc(-1);
+
+            if (trackControlCase) {
+                warn("TRACKED_FETCH nondirect insert pre-predict pc=%#x upc=%u "
+                     "npc=%#x bblAddr=%#x bblSize=%u ft=%#x ctrl=%d direct=%d "
+                     "cond=%d uncond=%d call=%d ret=%d micro=%d first=%d "
+                     "last=%d macroop=%p staticInst=%p prefetchEmpty=%d "
+                     "lastBblProbe=%c",
+                     inst->pcState().instAddr(),
+                     inst->pcState().microPC(),
+                     inst->pcState().nextInstAddr(),
+                     bblAddr[tid],
+                     bblSize[tid],
+                     ftPC.instAddr(),
+                     inst->isControl(),
+                     inst->isDirectCtrl(),
+                     inst->isCondCtrl(),
+                     inst->isUncondCtrl(),
+                     inst->isCall(),
+                     inst->isReturn(),
+                     inst->isMicroop(),
+                     inst->isFirstMicroop(),
+                     inst->isLastMicroop(),
+                     inst->macroop ? &*inst->macroop : nullptr,
+                     inst->staticInst ? &*inst->staticInst : nullptr,
+                     prefetchQueue[tid].empty(),
+                     rawBblProbe);
+            }
 
             DPRINTF(Bgodala, "BBLInsert Inserting Indirect ctrl bblAddr[tid]: %#x instAddr: %#x branchTarget: %#x bblSize: %d diff: %d\n",
                     bblAddr[tid], inst->pcState().instAddr(), dummyBranchTarget, bblSize[tid], inst->pcState().instAddr() - bblAddr[tid]);
@@ -969,57 +1063,88 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
                                   dummyBranchTarget,
                                   ftPC,
                                   inst->isUncondCtrl(),
-                                  tid);
+                                  tid,
+                                  branch_prediction::BTBFillSource::FetchNondirect);
         }
     }
     if (!prefetchQueue[tid].empty()) {
+        frontendPath = 'B';
+        if (trackChainCase) {
+            warn("TRACK_CHAIN queue-consume inst=%#x bblAddr=%#x q_front=%#x q_branch=%#x q_size=%zu micro=%d first=%d last=%d ctrl=%d direct=%d macro=%p\n",
+                 inst->pcState().instAddr(),
+                 bblAddr[tid],
+                 prefetchQueue[tid].front().instAddr(),
+                 prefetchQueueBr[tid].front().instAddr(),
+                 prefetchQueue[tid].size(),
+                 inst->isMicroop(),
+                 inst->isFirstMicroop(),
+                 inst->isLastMicroop(),
+                 inst->isControl(),
+                 inst->isDirectCtrl(),
+                 inst->macroop ? &*inst->macroop : nullptr);
+        }
         for (auto it = prefetchQueue[tid].cbegin(); it != prefetchQueue[tid].cend(); ++it)
             DPRINTF(Fetch, "%s\n", *it);
     
         for (auto it = prefetchQueueBr[tid].cbegin(); it != prefetchQueueBr[tid].cend(); ++it)
             DPRINTF(Fetch, "%s\n", *it);
 
-        tempPC = prefetchQueue[tid].front();
-        prefetchQueue[tid].pop_front();
-        prevPC[tid] = tempPC;
-        prefetchQueueBblSize[tid].pop_front();
-        brseq[tid] = prefetchQueueSeqNum[tid].front();
-        prefetchQueueSeqNum[tid].pop_front();
-        branchPC = prefetchQueueBr[tid].front();
-        prefetchQueueBr[tid].pop_front();
+        const TheISA::PCState queuedTarget = prefetchQueue[tid].front();
+        const TheISA::PCState queuedBranch = prefetchQueueBr[tid].front();
+        const InstSeqNum queuedSeq = prefetchQueueSeqNum[tid].front();
 
-        predict_taken = nextPC.npc() != tempPC.instAddr();
+        if (queuedBranch.instAddr() == inst->instAddr()) {
+            tempPC = queuedTarget;
+            prefetchQueue[tid].pop_front();
+            prevPC[tid] = tempPC;
+            prefetchQueueBblSize[tid].pop_front();
+            brseq[tid] = queuedSeq;
+            prefetchQueueSeqNum[tid].pop_front();
+            branchPC = queuedBranch;
+            prefetchQueueBr[tid].pop_front();
+            predict_taken = nextPC.npc() != tempPC.instAddr();
+        } else if (inst->instAddr() < queuedBranch.instAddr()) {
+            /*
+             * We are still executing inside a previously predicted basic
+             * block, but we have not yet reached the queued terminating
+             * branch. Keep the queued chain intact and simply continue down
+             * the current fallthrough path without creating a second branch
+             * prediction/history event for this internal control artifact.
+             */
+            branchPC = queuedBranch;
+            tempPC = ftPC;
+            predict_taken = false;
+        } else {
+            frontendPath = 'F';
+            branchPC = queuedBranch;
+            if (trackChainCase) {
+                warn("TRACK_CHAIN branch-mismatch inst=%#x queued_branch=%#x queued_target=%#x bblAddr=%#x q_remaining=%zu micro=%d first=%d last=%d ctrl=%d direct=%d macro=%p\n",
+                     inst->instAddr(),
+                     queuedBranch.instAddr(),
+                     queuedTarget.instAddr(),
+                     bblAddr[tid],
+                     prefetchQueue[tid].size(),
+                     inst->isMicroop(),
+                     inst->isFirstMicroop(),
+                     inst->isLastMicroop(),
+                     inst->isControl(),
+                     inst->isDirectCtrl(),
+                     inst->macroop ? &*inst->macroop : nullptr);
+            }
 
-        if (branchPC.instAddr()!=inst->instAddr()){
-            // squash branch predictor state to remove stale entries
-            branchPred->squash(brseq[tid]-1, tid);
-            // Reset prefetch Queue
             prefetchQueue[tid].clear();
             prefetchQueueBblSize[tid].clear();
             prefetchQueueSeqNum[tid].clear();
             prefetchQueueBr[tid].clear();
-            //prefetchBufferPC[tid].clear();
+
             tempPC = nextPC;
             predict_taken = branchPred->predict(inst->staticInst, seq[tid],
                                       bblAddr[tid], tempPC, tid);
             brseq[tid] = seq[tid];
             seq[tid]++;
             prefPC[tid] = tempPC;
-            DPRINTF(Fetch, "Nayana mismatch %#x, %#x\n", branchPC.instAddr(), inst->instAddr());
-            //if (prefetchQueue[tid].empty())
-            //    TheISA::advancePC(tempPC, inst->staticInst);
-            //else {
-            //    tempPC = prefetchQueue[tid].front();
-            //    prefetchQueue[tid].pop_front();
-            //    prevPC[tid] = tempPC;
-            //    prefetchQueueBblSize[tid].pop_front();
-            //    brseq[tid] = prefetchQueueSeqNum[tid].front();
-            //    prefetchQueueSeqNum[tid].pop_front();
-            //    branchPC = prefetchQueueBr[tid].front();
-            //    prefetchQueueBr[tid].pop_front();
-            //}
 
-            //assert(false && "branchpred called from fetch\n");
+            DPRINTF(Fetch, "Nayana mismatch %#x, %#x\n", queuedBranch.instAddr(), inst->instAddr());
             if(enableFDIP){
                 predictorInvoked = true;
             }
@@ -1030,6 +1155,13 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
                 brseq[tid], inst->pcState().instAddr(), tempPC, predict_taken, 
                 branchPC.instAddr(), prefetchQueue[tid].size());
     } else {
+        frontendPath = 'F';
+        if (trackChainCase) {
+            warn("TRACK_CHAIN fallback-predict inst=%#x bblAddr=%#x q_empty=1 probe=%c\n",
+                 inst->instAddr(),
+                 bblAddr[tid],
+                 rawBblProbe);
+        }
         DPRINTF(Fetch, "Nayana lookupAndupdate\n");
         tempPC = nextPC;
 	    DPRINTF(Fetch, "Bgodala tempPC is %#x\n", tempPC.instAddr());
@@ -1044,7 +1176,9 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
         }
     }
     if(!enableFDIP){
-        if (inst->isDirectCtrl() && bblAddr[tid] != 0) {
+        if (!queuedChainContinuation &&
+            archBtbEligibleControl && inst->isDirectCtrl() &&
+            bblAddr[tid] != 0) {
             DPRINTF(Bgodala, "BBLInsert Inserting bblAddr[tid]: %#x instAddr: %#x branchTarget: %#x bblSize: %d diff: %d\n",
                     bblAddr[tid], inst->pcState().instAddr(), inst->branchTarget(), bblSize[tid], inst->pcState().instAddr() - bblAddr[tid]);
             assert(((inst->pcState().instAddr() - bblAddr[tid]) == bblSize[tid]) && "BBLInsert Mismatch" );
@@ -1055,12 +1189,41 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
                                   inst->branchTarget(),
                                   ftPC,
                                   inst->isUncondCtrl(),
-                                  tid);
+                                  tid,
+                                  branch_prediction::BTBFillSource::FetchDirect);
         }
-        else if (inst->isControl() && bblAddr[tid] != 0) {
+        else if (!queuedChainContinuation &&
+                 archBtbEligibleControl && bblAddr[tid] != 0) {
             TheISA::PCState dummyBranchTarget = ftPC;
             //dummyBranchTarget.pc(-1);
             //dummyBranchTarget.npc(-1);
+
+            if (trackControlCase) {
+                warn("TRACKED_FETCH nondirect insert post-predict pc=%#x upc=%u "
+                     "npc=%#x bblAddr=%#x bblSize=%u ft=%#x ctrl=%d direct=%d "
+                     "cond=%d uncond=%d call=%d ret=%d micro=%d first=%d "
+                     "last=%d macroop=%p staticInst=%p prefetchEmpty=%d "
+                     "lastBblProbe=%c",
+                     inst->pcState().instAddr(),
+                     inst->pcState().microPC(),
+                     inst->pcState().nextInstAddr(),
+                     bblAddr[tid],
+                     bblSize[tid],
+                     ftPC.instAddr(),
+                     inst->isControl(),
+                     inst->isDirectCtrl(),
+                     inst->isCondCtrl(),
+                     inst->isUncondCtrl(),
+                     inst->isCall(),
+                     inst->isReturn(),
+                     inst->isMicroop(),
+                     inst->isFirstMicroop(),
+                     inst->isLastMicroop(),
+                     inst->macroop ? &*inst->macroop : nullptr,
+                     inst->staticInst ? &*inst->staticInst : nullptr,
+                     prefetchQueue[tid].empty(),
+                     rawBblProbe);
+            }
 
             DPRINTF(Bgodala, "BBLInsert Inserting Indirect ctrl bblAddr[tid]: %#x instAddr: %#x branchTarget: %#x bblSize: %d diff: %d\n",
                     bblAddr[tid], inst->pcState().instAddr(), dummyBranchTarget, bblSize[tid], inst->pcState().instAddr() - bblAddr[tid]);
@@ -1072,7 +1235,8 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
                                   dummyBranchTarget,
                                   ftPC,
                                   inst->isUncondCtrl(),
-                                  tid);
+                                  tid,
+                                  branch_prediction::BTBFillSource::FetchNondirect);
         }
     }
 
@@ -1099,7 +1263,26 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
             tid, inst->seqNum, inst->pcState().instAddr(), nextPC);
     inst->setPredTarg(nextPC);
     inst->setPredTaken(predict_taken);
+    inst->isBTBConsulted = branchPred->isBTBConsulted(brseq[tid], tid);
     inst->isBTBMiss = branchPred->isBTBMiss(brseq[tid], tid);
+    inst->btbFillSource = branchPred->getBTBSource(brseq[tid], tid);
+
+    if (inst->isDirectCtrl()) {
+        if (frontendPath == 'B') {
+            inst->isBTBConsulted = true;
+            inst->isBTBMiss = false;
+            inst->btbFillSource = branchPred->getBblSource(currentBblAddr, tid);
+            effectiveBblProbe = 'H';
+        } else if (frontendPath == 'F') {
+            inst->isBTBConsulted = true;
+            inst->isBTBMiss = true;
+            inst->btbFillSource = branch_prediction::BTBFillSource::None;
+            effectiveBblProbe = 'M';
+        }
+    }
+
+    inst->frontendPath = frontendPath;
+    inst->bblProbe = effectiveBblProbe;
 
     ++fetchStats.branches;
 
@@ -1591,16 +1774,44 @@ void
 Fetch::doSquash(const TheISA::PCState &newPC, const DynInstPtr squashInst,
         ThreadID tid)
 {
+    auto trackMacroPc = [](Addr pc) {
+        switch (pc) {
+          case 0xffff8000081985acULL:
+          case 0xffff8000081985b0ULL:
+          case 0xffff800008198640ULL:
+          case 0xffff800008198644ULL:
+          case 0xffff80000819868cULL:
+          case 0xffff800008198698ULL:
+          case 0xffff800008197f88ULL:
+          case 0xffff800008197fd4ULL:
+          case 0xffff800008197fd8ULL:
+          case 0xffff800008197fe4ULL:
+          case 0xffff800008120704ULL:
+          case 0xffff800008120734ULL:
+          case 0xaaaadebf0c64ULL:
+          case 0xaaaadebf0c68ULL:
+          case 0xaaaadebf0c6cULL:
+          case 0xaaaadebf0cfcULL:
+          case 0xaaaadebf0d08ULL:
+            return true;
+          default:
+            return false;
+        }
+    };
+
     trackLastBlock = false;
+    TheISA::PCState squashPC = newPC;
+    squashPC.upc(0);
+    squashPC.nupc(1);
     DPRINTF(Fetch, "[tid:%i] Squashing, setting PC to: %s.\n",
-            tid, newPC);
+            tid, squashPC);
 
     //DPRINTF(Fetch, "[tid:%i] prefetchQueue size: %d, %s.\n",
     //        tid, prefetchQueue[tid].size(), prefetchQueue[tid].front());
     //if (lastinst[tid]) {
-        prefPC[tid] = newPC;
-        lastPrefPC = newPC;
-        resteerTarget = newPC.instAddr();
+        prefPC[tid] = squashPC;
+        lastPrefPC = squashPC;
+        resteerTarget = squashPC.instAddr();
         //bblAddr[tid] = prefPC[tid].instAddr();
         prefetchQueue[tid].clear();
         prefetchQueueBblSize[tid].clear();
@@ -1615,15 +1826,29 @@ Fetch::doSquash(const TheISA::PCState &newPC, const DynInstPtr squashInst,
     lastAddrFetched = 0;
     fallThroughPrefPC = 0;
 
-    pc[tid] = newPC;
+    if (trackMacroPc(newPC.instAddr()) ||
+        (squashInst && trackMacroPc(squashInst->pcState().instAddr()))) {
+        warn("TRACKED_MACRO squash tid=%u newPC=%#llx upc=%u squashInstPC=%#llx squashInstMicro=%u oldMacro=%p\n",
+             tid,
+             (unsigned long long)newPC.instAddr(),
+             (unsigned)newPC.microPC(),
+             squashInst ? (unsigned long long)squashInst->pcState().instAddr() : 0ULL,
+             squashInst ? (unsigned)squashInst->pcState().microPC() : 0U,
+             macroop[tid].get());
+    }
+
+    pc[tid] = squashPC;
     lastinst[tid] = squashInst;
 
     DPRINTF(Fetch, "[tid:%i] Squashing, Queue to size: %d %d %d.\n",
             tid, fetchBuffer[tid].size(), fetchBufferPC[tid].size(), fetchBufferValid[tid].size());
     fetchOffset[tid] = 0;
-    if (squashInst && squashInst->pcState().instAddr() == newPC.instAddr()) {
-        macroop[tid] = squashInst->macroop;
-        //macroop[tid] = NULL; 
+    if (squashInst && squashInst->pcState().instAddr() == squashPC.instAddr()) {
+        // The decoder and fetch buffer are reset below, so carrying a
+        // previously decoded macroop across the squash can leave fetch
+        // resuming at a stale microPC with no matching decoded microop.
+        // Restart cleanly from the architectural PC after the squash.
+        macroop[tid] = NULL;
         //for ( auto &buf_it : fetchBuffer[tid]){
         //    delete &*buf_it;
         //}
@@ -1939,7 +2164,8 @@ Fetch::checkSignalsAndUpdate(ThreadID tid)
 
             TheISA::PCState ftPC;
             fromCommit->commitInfo[tid].mispredictInst->staticInst->advancePC(ftPC);
-            uint64_t bblSz = (fromCommit->commitInfo[tid].mispredictInst->pcState().instAddr() - fromCommit->commitInfo[tid].bblAddr) / 4;
+            const uint64_t bblSz =
+                fromCommit->commitInfo[tid].mispredictInst->bblSize;
             DPRINTF(Fetch, "%s, %#x, %d\n", fromCommit->commitInfo[tid].mispredictInst->staticInst, ftPC.instAddr(), bblSz);
 
             branchPred->squash(//fromCommit->commitInfo[tid].doneSeqNum,
@@ -2065,7 +2291,7 @@ Fetch::checkSignalsAndUpdate(ThreadID tid)
                               fromDecode->decodeInfo[tid].bblAddr,
                               fromDecode->decodeInfo[tid].mispredictInst->staticInst,
                               fromDecode->decodeInfo[tid].mispredictInst->pcState(),
-                              1,
+                              fromDecode->decodeInfo[tid].bblSize,
                               fromDecode->decodeInfo[tid].nextPC,
                               ftPC,
                               fromDecode->decodeInfo[tid].branchTaken,
@@ -2194,14 +2420,29 @@ Fetch::buildInst(ThreadID tid, StaticInstPtr staticInst,
 TheISA::PCState
 Fetch::predictNextBasicBlock(TheISA::PCState prefetchPc, TheISA::PCState &branchPC, ThreadID tid, bool &stopPrefetch, bool &instLimitReached)
 {
+    const bool trackChainCase =
+        prefetchPc.instAddr() == 0xffff800008110808ULL ||
+        prefetchPc.instAddr() == 0xffff800008110638ULL ||
+        prefetchPc.instAddr() == 0xaaaadebf0cfcULL ||
+        prefetchPc.instAddr() == 0xaaaadebf0c68ULL;
     TheISA::PCState predictPC = prefetchPc;
     auto& btbConf = cpu->btbConfMap[prefetchPc.instAddr()];
     uint64_t &btbTotal = std::get<0>(btbConf);
     uint64_t &btbMisPred = std::get<1>(btbConf);
     btbTotal++;
     if (!branchPred->getBblValid(prefetchPc.instAddr(), tid)){
+        lastBblProbeResult[tid] = 'M';
+        if (trackChainCase) {
+            warn("TRACK_CHAIN bbl-probe-miss prefetchPc=%#x tid=%u\n",
+                 prefetchPc.instAddr(), tid);
+        }
         btbMisPred++;
         return 0;
+    }
+    lastBblProbeResult[tid] = 'H';
+    if (trackChainCase) {
+        warn("TRACK_CHAIN bbl-probe-hit prefetchPc=%#x tid=%u\n",
+             prefetchPc.instAddr(), tid);
     }
     //if((prefetchPc.instAddr() & 0xff000000) != 0){
     //    return 0;
@@ -2215,6 +2456,17 @@ Fetch::predictNextBasicBlock(TheISA::PCState prefetchPc, TheISA::PCState &branch
         // TODO: Multiple BBLs
         StaticInstPtr staticBranchInst = branchPred->getBranch(prefetchPc.instAddr(), tid);
         branchPC = branchPred->getBranchPC(prefetchPc.instAddr(), tid);
+        if (trackChainCase) {
+            warn("TRACK_CHAIN bbl-entry prefetchPc=%#x branchPC=%#x branchType[ctrl=%d direct=%d cond=%d uncond=%d call=%d ret=%d]\n",
+                 prefetchPc.instAddr(),
+                 branchPC.instAddr(),
+                 staticBranchInst->isControl(),
+                 staticBranchInst->isDirectCtrl(),
+                 staticBranchInst->isCondCtrl(),
+                 staticBranchInst->isUncondCtrl(),
+                 staticBranchInst->isCall(),
+                 staticBranchInst->isReturn());
+        }
 
         //if(!staticBranchInst->isDirectCtrl()){
         //    return 0;
@@ -2262,6 +2514,14 @@ Fetch::predictNextBasicBlock(TheISA::PCState prefetchPc, TheISA::PCState &branch
 	    DPRINTF(Bgodala, "Bgodala Staticinst 0x%lx and BranchPC %s\n",staticBranchInst, branchPC);
         bool predict_taken = branchPred->predict(staticBranchInst, seq[tid],
                                       prefetchPc.instAddr(), nextPC, tid);
+        if (trackChainCase) {
+            warn("TRACK_CHAIN bbl-predict prefetchPc=%#x branchPC=%#x predict_taken=%d nextPC=%#x nextUpc=%u\n",
+                 prefetchPc.instAddr(),
+                 branchPC.instAddr(),
+                 predict_taken,
+                 nextPC.instAddr(),
+                 (unsigned)nextPC.microPC());
+        }
 
         if(nextPC.instAddr() < 0x1000){
             nextPC = branchPC;
@@ -2458,7 +2718,8 @@ Fetch::preDecode(){
                                           staticInst->branchTarget(thisPC),
                                           nextPC,
                                           staticInst->isUncondCtrl(),
-                                          tid);
+                                          tid,
+                                          branch_prediction::BTBFillSource::PredecodeDirect);
                     assert(thisPC.instAddr() >= bblPC.instAddr()  && "bblSize must be greater than 0");
                     bblPC = nextPC;
                 } else if(staticInst->isControl()){
@@ -2475,7 +2736,8 @@ Fetch::preDecode(){
                                           dummyBranchTarget,
                                           nextPC,
                                           staticInst->isUncondCtrl(),
-                                          tid);
+                                          tid,
+                                          branch_prediction::BTBFillSource::FetchNondirect);
                     assert(thisPC.instAddr() >= bblPC.instAddr()  && "bblSize must be greater than 0");
                     bblPC = nextPC;
                 }
@@ -2706,6 +2968,10 @@ Fetch::addToFTQ()
     if (prefPC[tid].instAddr() < 0x10){
         return;
     }
+    // Keep BTB learning tied to architecturally encountered branch
+    // instructions during fetch/execute rather than bulk predecoding whole
+    // fetched lines ahead of the first branch appearance. This keeps BTB
+    // restoration experiments from being warmed by line-level decode.
     //assert(prefPC[tid].instAddr() != 0 && "prefPC cannot be 0\n");
     preDecodeAllLines();
     //preDecode();
@@ -2724,6 +2990,17 @@ Fetch::addToFTQ()
         bool stopPrefetch = false;
         bool limitReached = false;
         nextPC = predictNextBasicBlock(thisPC, branchPC, tid, stopPrefetch, limitReached);
+        const bool trackChainCase =
+            thisPC.instAddr() == 0xffff800008110808ULL ||
+            thisPC.instAddr() == 0xffff800008110638ULL ||
+            thisPC.instAddr() == 0xaaaadebf0cfcULL ||
+            thisPC.instAddr() == 0xaaaadebf0c68ULL ||
+            branchPC.instAddr() == 0xffff80000811081cULL ||
+            branchPC.instAddr() == 0xffff800008110644ULL ||
+            branchPC.instAddr() == 0xaaaadebf0d08ULL ||
+            branchPC.instAddr() == 0xaaaadebf0c6cULL ||
+            nextPC.instAddr() == 0xffff800008110638ULL ||
+            nextPC.instAddr() == 0xaaaadebf0c68ULL;
         if(limitReached){
             return;
         }
@@ -2770,6 +3047,15 @@ Fetch::addToFTQ()
             prefetchQueueBblSize[tid].push_back(branchPC.instAddr() - thisPC.instAddr());
             prefetchQueueSeqNum[tid].push_back(seq[tid]);
             prefetchQueueBr[tid].push_back(branchPC);
+            if (trackChainCase) {
+                warn("TRACK_CHAIN enqueue thisPC=%#x branchPC=%#x nextPC=%#x q_size=%zu bblSize=%d seq=%llu\n",
+                     thisPC.instAddr(),
+                     branchPC.instAddr(),
+                     nextPC.instAddr(),
+                     prefetchQueue[tid].size(),
+                     branchPC.instAddr() - thisPC.instAddr(),
+                     (unsigned long long)seq[tid]);
+            }
             seq[tid]++;
             DPRINTF(Fetch, "[tid:%i] Prefetch queue entry created (%i/%i) %s %s.\n",
                     tid, prefetchQueue[tid].size(), prefetchQueueSize, prefetchQueue[tid].front(), nextPC);
@@ -3041,8 +3327,56 @@ Fetch::fetch(bool &status_change)
 
     //assert(fetchAddr == thisPC.instAddr() && "fetchAddr and thisPC are not same!");
     Addr fetchBufferBlockPC = fetchBufferAlignPC(fetchAddr);
+    auto trackMacroPc = [](Addr pc) {
+        switch (pc) {
+          case 0xffff8000081985acULL:
+          case 0xffff8000081985b0ULL:
+          case 0xffff800008198640ULL:
+          case 0xffff800008198644ULL:
+          case 0xffff80000819868cULL:
+          case 0xffff800008198698ULL:
+          case 0xffff800008197f88ULL:
+          case 0xffff800008197fd4ULL:
+          case 0xffff800008197fd8ULL:
+          case 0xffff800008197fe4ULL:
+          case 0xffff800008120704ULL:
+          case 0xffff800008120734ULL:
+            return true;
+          default:
+            return false;
+        }
+    };
+    auto shouldTraceMacroState =
+        [&](Addr pc, const StaticInstPtr &macro) {
+            return trackMacroPc(pc);
+        };
+    auto shouldTraceUserDecode =
+        [&](Addr pc) {
+            switch (pc) {
+              case 0xaaaadebf0c64ULL:
+              case 0xaaaadebf0c68ULL:
+              case 0xaaaadebf0c6cULL:
+              case 0xaaaadebf0cfcULL:
+              case 0xaaaadebf0d08ULL:
+                return true;
+              default:
+                return false;
+            }
+        };
 
     bool inRom = isRomMicroPC(thisPC.microPC());
+    if (shouldTraceMacroState(thisPC.instAddr(), macroop[tid])) {
+        warn("TRACKED_MACRO fetch-entry tid=%u pc=%#llx upc=%u fetchOffset=%llu macroop=%p inRom=%d fetchBufPC=%#llx blockPC=%#llx\n",
+             tid,
+             (unsigned long long)thisPC.instAddr(),
+             (unsigned)thisPC.microPC(),
+             (unsigned long long)pcOffset,
+             macroop[tid].get(),
+             inRom,
+             fetchBufferPC[tid].empty() ? 0ULL :
+                 (unsigned long long)fetchBufferPC[tid].front(),
+             (unsigned long long)fetchBufferBlockPC);
+    }
 
     // If returning from the delay of a cache miss, then update the status
     // to running, otherwise do the cache access.  Possibly move this up
@@ -3175,8 +3509,8 @@ Fetch::fetch(bool &status_change)
         fetchAddr = (thisPC.instAddr() + pcOffset) & pc_mask;
         Addr fetchBufferBlockPC = fetchBufferAlignPC(fetchAddr);
 
-        if (needMem) {
-            // If buffer is no longer valid or fetchAddr has moved to point
+            if (needMem) {
+                // If buffer is no longer valid or fetchAddr has moved to point
             // to the next cache block then start fetch from icache.
             //if (!fetchBufferValid[tid] ||
 
@@ -3194,6 +3528,24 @@ Fetch::fetch(bool &status_change)
 
             memcpy(dec_ptr->moreBytesPtr(),
                     fetchBufferHead + blkOffset * instSize, instSize);
+            if (shouldTraceUserDecode(thisPC.instAddr())) {
+                uint32_t raw = 0;
+                memcpy(&raw, fetchBufferHead + blkOffset * instSize, instSize);
+                warn("TRACKED_DECODE bytes pc=%#llx fetchAddr=%#llx fetchBufPC=%#llx "
+                     "blkOffset=%u pcOffset=%llu raw=%#x needMore=%d instReady=%d "
+                     "macro=%p inRom=%d\n",
+                     (unsigned long long)thisPC.instAddr(),
+                     (unsigned long long)fetchAddr,
+                     fetchBufferPC[tid].empty() ? 0ULL :
+                         (unsigned long long)fetchBufferPC[tid].front(),
+                     blkOffset,
+                     (unsigned long long)pcOffset,
+                     raw,
+                     dec_ptr->needMoreBytes(),
+                     dec_ptr->instReady(),
+                     curMacroop.get(),
+                     inRom);
+            }
             decoder[tid]->moreBytes(thisPC, fetchAddr);
 
             if (dec_ptr->needMoreBytes()) {
@@ -3209,12 +3561,38 @@ Fetch::fetch(bool &status_change)
             if (!(curMacroop || inRom)) {
                 if (dec_ptr->instReady()) {
                     staticInst = dec_ptr->decode(thisPC);
+                    if (shouldTraceUserDecode(thisPC.instAddr())) {
+                        warn("TRACKED_DECODE decoded pc=%#llx upc=%u inst=%p "
+                             "disasm=%s flags[ctrl=%d direct=%d cond=%d uncond=%d "
+                             "call=%d ret=%d macro=%d micro=%d]\n",
+                             (unsigned long long)thisPC.instAddr(),
+                             (unsigned)thisPC.microPC(),
+                             staticInst.get(),
+                             staticInst->disassemble(thisPC.instAddr()),
+                             staticInst->isControl(),
+                             staticInst->isDirectCtrl(),
+                             staticInst->isCondCtrl(),
+                             staticInst->isUncondCtrl(),
+                             staticInst->isCall(),
+                             staticInst->isReturn(),
+                             staticInst->isMacroop(),
+                             staticInst->isMicroop());
+                    }
 
                     // Increment stat of fetched instructions.
                     ++fetchStats.insts;
 
                     if (staticInst->isMacroop()) {
                         curMacroop = staticInst;
+                        if (shouldTraceMacroState(thisPC.instAddr(),
+                                                  curMacroop)) {
+                            warn("TRACKED_MACRO decode-macro tid=%u pc=%#llx upc=%u macro=%p disasm=%s\n",
+                                 tid,
+                                 (unsigned long long)thisPC.instAddr(),
+                                 (unsigned)thisPC.microPC(),
+                                 curMacroop.get(),
+                                 curMacroop->disassemble(thisPC.instAddr()));
+                        }
                     } else {
                         pcOffset = 0;
                     }
@@ -3229,11 +3607,27 @@ Fetch::fetch(bool &status_change)
             // thinks we are...
             bool newMacro = false;
             if (curMacroop || inRom) {
+                if (shouldTraceMacroState(thisPC.instAddr(), curMacroop)) {
+                    warn("TRACKED_MACRO fetch-micro-before tid=%u pc=%#llx upc=%u macro=%p inRom=%d\n",
+                         tid,
+                         (unsigned long long)thisPC.instAddr(),
+                         (unsigned)thisPC.microPC(),
+                         curMacroop.get(),
+                         inRom);
+                }
                 if (inRom) {
                     staticInst = dec_ptr->fetchRomMicroop(
                             thisPC.microPC(), curMacroop);
                 } else {
                     staticInst = curMacroop->fetchMicroop(thisPC.microPC());
+                }
+                if (shouldTraceMacroState(thisPC.instAddr(), curMacroop)) {
+                    warn("TRACKED_MACRO fetch-micro-after tid=%u pc=%#llx upc=%u macro=%p staticInst=%p\n",
+                         tid,
+                         (unsigned long long)thisPC.instAddr(),
+                         (unsigned)thisPC.microPC(),
+                         curMacroop.get(),
+                         staticInst.get());
                 }
                 newMacro |= staticInst->isLastMicroop();
             }
@@ -3446,6 +3840,18 @@ Fetch::fetch(bool &status_change)
             predictedBranch |= thisPC.branching();
             predictedBranch |=
                 lookupAndUpdateNextPC(instruction, nextPC);
+            if (shouldTraceMacroState(thisPC.instAddr(), curMacroop)) {
+                warn("TRACKED_MACRO post-lookup tid=%u pc=%#llx upc=%u nextPC=%#llx nextUpc=%u predictedBranch=%d newMacro=%d macro=%p inst=%p\n",
+                     tid,
+                     (unsigned long long)thisPC.instAddr(),
+                     (unsigned)thisPC.microPC(),
+                     (unsigned long long)nextPC.instAddr(),
+                     (unsigned)nextPC.microPC(),
+                     predictedBranch,
+                     newMacro,
+                     curMacroop.get(),
+                     instruction->staticInst.get());
+            }
             instruction->setBrSeq(brseq[tid]);
             if (predictedBranch) {
                 DPRINTF(Fetch, "Branch detected with PC = %s\n", thisPC);
@@ -3459,6 +3865,15 @@ Fetch::fetch(bool &status_change)
             inRom = isRomMicroPC(thisPC.microPC());
 
             if (newMacro) {
+                if (shouldTraceMacroState(thisPC.instAddr(), curMacroop)) {
+                    warn("TRACKED_MACRO clear-macro tid=%u pc=%#llx upc=%u nextPC=%#llx nextUpc=%u macro=%p\n",
+                         tid,
+                         (unsigned long long)thisPC.instAddr(),
+                         (unsigned)thisPC.microPC(),
+                         (unsigned long long)thisPC.instAddr(),
+                         (unsigned)thisPC.microPC(),
+                         curMacroop.get());
+                }
                 fetchAddr = thisPC.instAddr() & pc_mask;
                 //blkOffset = (fetchAddr - fetchBufferPC[tid]) / instSize;
                 blkOffset = (fetchAddr - fetchBufferPC[tid].front()) / instSize;
@@ -3496,6 +3911,16 @@ Fetch::fetch(bool &status_change)
     }
 
     macroop[tid] = curMacroop;
+    if (shouldTraceMacroState(thisPC.instAddr(), curMacroop)) {
+        warn("TRACKED_MACRO fetch-exit tid=%u pc=%#llx upc=%u macroop=%p predictedBranch=%d fetchStatus=%d numInst=%d\n",
+             tid,
+             (unsigned long long)thisPC.instAddr(),
+             (unsigned)thisPC.microPC(),
+             macroop[tid].get(),
+             predictedBranch,
+             fetchStatus[tid],
+             numInst);
+    }
     fetchOffset[tid] = pcOffset;
 
     if (numInst > 0) {
