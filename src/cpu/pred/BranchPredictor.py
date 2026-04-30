@@ -76,6 +76,14 @@ class BranchPredictor(SimObject):
     BTBEntries = Param.Unsigned(65536, "Number of BTB entries")
     #BTBTagSize = Param.Unsigned(16, "Size of the BTB tags, in bits")
     BTBTagSize = Param.Unsigned(46, "Size of the BTB tags, in bits")
+    restoreBTBState = Param.Bool(
+        False,
+        "Restore staged BTB entries from a checkpoint-local replay file",
+    )
+    btbRestoreFile = Param.String(
+        "",
+        "Path to the staged checkpoint-local BTB replay file",
+    )
     RASSize = Param.Unsigned(16, "RAS size")
     instShiftAmt = Param.Unsigned(2, "Number of bits to shift instructions by")
 
@@ -778,5 +786,4 @@ class MultiperspectivePerceptronTAGE8KB(MultiperspectivePerceptronTAGE):
     tage = MPP_TAGE_8KB()
     loop_predictor = MPP_LoopPredictor_8KB()
     statistical_corrector = MPP_StatisticalCorrector_8KB()
-
 

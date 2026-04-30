@@ -41,13 +41,28 @@ namespace gem5
 namespace branch_prediction
 {
 
+enum class BTBFillSource : uint8_t
+{
+    None = 0,
+    FetchDirect,
+    FetchNondirect,
+    PredecodeDirect,
+    ResolveControl,
+    Restore,
+};
+
+const char *btbFillSourceName(BTBFillSource source);
+char btbFillSourceTraceChar(BTBFillSource source);
+
 class DefaultBTB
 {
   private:
     struct BTBEntry
     {
         BTBEntry()
-            : tag(0), staticBranchInst(0), branch(0), bblSize(0), target(0), fallthrough(0), uncond(false), valid(false)
+            : tag(0), staticBranchInst(0), branch(0), bblSize(0), target(0),
+              fallthrough(0), uncond(false), valid(false),
+              fillSource(BTBFillSource::None)
         {}
 
         /** The entry's tag. */
@@ -73,6 +88,9 @@ class DefaultBTB
 
         /** Whether or not the entry is valid. */
         bool valid;
+
+        /** Last mechanism that populated this entry. */
+        BTBFillSource fillSource;
     };
 
   public:
@@ -113,6 +131,7 @@ class DefaultBTB
      *  @return Returns the fall-through of the branch.
      */
     TheISA::PCState lookupFT(Addr instPC, ThreadID tid);
+    BTBFillSource lookupSource(Addr instPC, ThreadID tid);
 
     bool type(Addr instPC, ThreadID tid);
 
@@ -129,13 +148,15 @@ class DefaultBTB
      *  @param tid The thread id.
      */
     void update(Addr instPC, const TheISA::PCState &targetPC,
-                ThreadID tid);
+                ThreadID tid,
+                BTBFillSource source = BTBFillSource::ResolveControl);
 
     // Nayana added
     void update(Addr instPC, const StaticInstPtr &staticBranchInst, 
                 const TheISA::PCState &branch,
                 const uint64_t bblSize, const TheISA::PCState &target, 
-                const TheISA::PCState &ft, bool uncond, ThreadID tid);
+                const TheISA::PCState &ft, bool uncond, ThreadID tid,
+                BTBFillSource source);
 
   private:
     /** Returns the index into the BTB, based on the branch's PC.

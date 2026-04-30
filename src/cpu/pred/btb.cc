@@ -38,6 +38,121 @@ namespace gem5
 namespace branch_prediction
 {
 
+namespace
+{
+
+constexpr Addr kTrackedBTBAddr = 0xaaaadebf09f4;
+constexpr unsigned kTrackedBTBIndex = 637;
+constexpr Addr kTrackedBTBTag = 0xdebf;
+
+constexpr Addr kTrackedKernelBranchPcs[] = {
+    0xffff8000081985b0,
+    0xffff800008198644,
+    0xffff800008198698,
+    0xffff800008120734,
+    0xffff800008197fd4,
+    0xffff800008197fe4,
+};
+
+constexpr Addr kTrackedKernelBblStarts[] = {
+    0xffff8000081985ac,
+    0xffff800008198640,
+    0xffff80000819868c,
+    0xffff800008120704,
+    0xffff800008197f88,
+    0xffff800008197fd8,
+};
+
+constexpr Addr kTrackedUserBranchPcs[] = {
+    0xaaaadebf0d08,
+    0xaaaadebf0c6c,
+};
+
+constexpr Addr kTrackedUserBblStarts[] = {
+    0xaaaadebf0cfc,
+    0xaaaadebf0c68,
+};
+
+template <size_t N>
+bool
+containsTrackedAddr(const Addr (&addrs)[N], Addr value)
+{
+    for (Addr addr : addrs) {
+        if (addr == value) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool
+isTrackedKernelBranch(Addr value)
+{
+    return containsTrackedAddr(kTrackedKernelBranchPcs, value);
+}
+
+bool
+isTrackedKernelBblStart(Addr value)
+{
+    return containsTrackedAddr(kTrackedKernelBblStarts, value);
+}
+
+bool
+isTrackedUserBranch(Addr value)
+{
+    return containsTrackedAddr(kTrackedUserBranchPcs, value);
+}
+
+bool
+isTrackedUserBblStart(Addr value)
+{
+    return containsTrackedAddr(kTrackedUserBblStarts, value);
+}
+
+} // anonymous namespace
+
+const char *
+btbFillSourceName(BTBFillSource source)
+{
+    switch (source) {
+      case BTBFillSource::None:
+        return "None";
+      case BTBFillSource::FetchDirect:
+        return "FetchDirect";
+      case BTBFillSource::FetchNondirect:
+        return "FetchNondirect";
+      case BTBFillSource::PredecodeDirect:
+        return "PredecodeDirect";
+      case BTBFillSource::ResolveControl:
+        return "ResolveControl";
+      case BTBFillSource::Restore:
+        return "Restore";
+    }
+
+    return "Unknown";
+}
+
+char
+btbFillSourceTraceChar(BTBFillSource source)
+{
+    switch (source) {
+      case BTBFillSource::None:
+        return '-';
+      case BTBFillSource::FetchDirect:
+        return 'd';
+      case BTBFillSource::FetchNondirect:
+        return 'n';
+      case BTBFillSource::PredecodeDirect:
+        return 'p';
+      case BTBFillSource::ResolveControl:
+        return 'c';
+      case BTBFillSource::Restore:
+        return 'r';
+    }
+
+    return '?';
+}
+
 DefaultBTB::DefaultBTB(unsigned _numEntries,
                        unsigned _tagBits,
                        unsigned _instShiftAmt,
@@ -122,9 +237,28 @@ DefaultBTB::valid(Addr instPC, ThreadID tid)
 
     assert(btb_idx < numEntries);
 
-    if (btb[btb_idx].valid
+    const bool hit = btb[btb_idx].valid
         && inst_tag == btb[btb_idx].tag
-        && btb[btb_idx].tid == tid) {
+        && btb[btb_idx].tid == tid;
+
+    if ((instPC == kTrackedBTBAddr ||
+         isTrackedKernelBblStart(instPC) ||
+         isTrackedUserBblStart(instPC)) &&
+        tid == 0) {
+        warn(
+            "TRACKED_BTB valid(%#x) -> %s at idx=%u tag=%#x occupant_valid=%d "
+            "occupant_tag=%#x occupant_branch=%#x occupant_source=%s",
+            instPC,
+            hit ? "hit" : "miss",
+            btb_idx,
+            inst_tag,
+            btb[btb_idx].valid,
+            btb[btb_idx].tag,
+            btb[btb_idx].valid ? btb[btb_idx].branch.instAddr() : 0,
+            btbFillSourceName(btb[btb_idx].fillSource));
+    }
+
+    if (hit) {
         return true;
     } else {
         return false;
@@ -275,8 +409,26 @@ DefaultBTB::lookupFT(Addr instPC, ThreadID tid)
     }
 }
 
+BTBFillSource
+DefaultBTB::lookupSource(Addr instPC, ThreadID tid)
+{
+    unsigned btb_idx = getIndex(instPC, tid);
+    Addr inst_tag = getTag(instPC);
+
+    assert(btb_idx < numEntries);
+
+    if (btb[btb_idx].valid
+        && inst_tag == btb[btb_idx].tag
+        && btb[btb_idx].tid == tid) {
+        return btb[btb_idx].fillSource;
+    } else {
+        return BTBFillSource::None;
+    }
+}
+
 void
-DefaultBTB::update(Addr instPC, const TheISA::PCState &target, ThreadID tid)
+DefaultBTB::update(Addr instPC, const TheISA::PCState &target, ThreadID tid,
+                   BTBFillSource source)
 {
     unsigned btb_idx = getIndex(instPC, tid);
 
@@ -286,13 +438,15 @@ DefaultBTB::update(Addr instPC, const TheISA::PCState &target, ThreadID tid)
     btb[btb_idx].valid = true;
     btb[btb_idx].target = target;
     btb[btb_idx].tag = getTag(instPC);
+    btb[btb_idx].fillSource = source;
 }
 
 void
 DefaultBTB::update(Addr instPC, const StaticInstPtr &staticBranchInst, 
                    const TheISA::PCState &branch,
                    const uint64_t bblSize, const TheISA::PCState &target, 
-                   const TheISA::PCState &ft, bool uncond, ThreadID tid)
+                   const TheISA::PCState &ft, bool uncond, ThreadID tid,
+                   BTBFillSource source)
 {
     unsigned btb_idx = getIndex(instPC, tid);
     
@@ -300,6 +454,45 @@ DefaultBTB::update(Addr instPC, const StaticInstPtr &staticBranchInst,
 		    btb_idx, &*staticBranchInst, target, branch);
 
     assert(btb_idx < numEntries);
+
+    const bool touchesTrackedSlot =
+        (tid == 0) &&
+        (btb_idx == kTrackedBTBIndex ||
+         instPC == kTrackedBTBAddr ||
+         isTrackedKernelBblStart(instPC) ||
+         isTrackedUserBblStart(instPC) ||
+         isTrackedKernelBranch(branch.instAddr()) ||
+         isTrackedUserBranch(branch.instAddr()) ||
+         (btb[btb_idx].valid &&
+          btb[btb_idx].tag == kTrackedBTBTag &&
+          btb[btb_idx].tid == 0));
+    if (touchesTrackedSlot) {
+        warn(
+            "TRACKED_BTB update idx=%u instPC=%#x branch=%#x bblSize=%llu "
+            "target=%#x ft=%#x uncond=%d source=%s inst_flags[ctrl=%d "
+            "direct=%d cond=%d uncond=%d call=%d ret=%d macro=%d micro=%d] "
+            "old_valid=%d old_tag=%#x old_branch=%#x old_source=%s",
+            btb_idx,
+            instPC,
+            branch.instAddr(),
+            (unsigned long long)bblSize,
+            target.instAddr(),
+            ft.instAddr(),
+            uncond,
+            btbFillSourceName(source),
+            staticBranchInst ? staticBranchInst->isControl() : 0,
+            staticBranchInst ? staticBranchInst->isDirectCtrl() : 0,
+            staticBranchInst ? staticBranchInst->isCondCtrl() : 0,
+            staticBranchInst ? staticBranchInst->isUncondCtrl() : 0,
+            staticBranchInst ? staticBranchInst->isCall() : 0,
+            staticBranchInst ? staticBranchInst->isReturn() : 0,
+            staticBranchInst ? staticBranchInst->isMacroop() : 0,
+            staticBranchInst ? staticBranchInst->isMicroop() : 0,
+            btb[btb_idx].valid,
+            btb[btb_idx].tag,
+            btb[btb_idx].valid ? btb[btb_idx].branch.instAddr() : 0,
+            btbFillSourceName(btb[btb_idx].fillSource));
+    }
 
     btb[btb_idx].tid = tid;
     btb[btb_idx].valid = true;
@@ -310,6 +503,16 @@ DefaultBTB::update(Addr instPC, const StaticInstPtr &staticBranchInst,
     btb[btb_idx].fallthrough = ft;
     btb[btb_idx].tag = getTag(instPC);
     btb[btb_idx].uncond = uncond;
+    btb[btb_idx].fillSource = source;
+
+    if (touchesTrackedSlot) {
+        warn(
+            "TRACKED_BTB post-update idx=%u tag=%#x branch=%#x source=%s",
+            btb_idx,
+            btb[btb_idx].tag,
+            btb[btb_idx].branch.instAddr(),
+            btbFillSourceName(btb[btb_idx].fillSource));
+    }
 
     ////Bgodala
     ////Update the leader BTB Entry when ever update to any entry happens

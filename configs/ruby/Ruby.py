@@ -86,6 +86,12 @@ def define_options(parser):
             "Restore private L1I warm-state lines discovered from checkpoint "
             "metadata if available"
         ))
+    parser.add_argument(
+        "--restore-btb-state", action="store_true", default=False,
+        help=(
+            "Restore direct BTB entries discovered from checkpoint metadata "
+            "if available"
+        ))
 
     # Options related to cache structure
     parser.add_argument(
