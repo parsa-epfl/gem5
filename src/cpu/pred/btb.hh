@@ -53,7 +53,6 @@ enum class BTBFillSource : uint8_t
     Restore,
 };
 
-const char *btbFillSourceName(BTBFillSource source);
 char btbFillSourceTraceChar(BTBFillSource source);
 
 class DefaultBTB

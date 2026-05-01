@@ -38,120 +38,6 @@ namespace gem5
 namespace branch_prediction
 {
 
-namespace
-{
-
-constexpr Addr kTrackedBTBAddr = 0xaaaadebf09f4;
-constexpr unsigned kTrackedBTBIndex = 637;
-constexpr Addr kTrackedBTBTag = 0xdebf;
-
-constexpr Addr kTrackedKernelBranchPcs[] = {
-    0xffff8000081985b0,
-    0xffff800008198644,
-    0xffff800008198698,
-    0xffff800008120734,
-    0xffff800008197fd4,
-    0xffff800008197fe4,
-    0xffff800008a3fcb4,
-    0xffff8000080116d8,
-};
-
-constexpr Addr kTrackedKernelBblStarts[] = {
-    0xffff8000081985ac,
-    0xffff800008198640,
-    0xffff80000819868c,
-    0xffff800008120704,
-    0xffff800008197f88,
-    0xffff800008197fd8,
-    0xffff800008a3fca0,
-    0xffff8000080116d8,
-};
-
-constexpr Addr kTrackedUserBranchPcs[] = {
-    0xaaaadebf216c,
-    0xaaaadebf2178,
-    0xaaaadebf219c,
-    0xaaaadebf20d8,
-    0xaaaadebf0e48,
-    0xaaaadebf0f40,
-    0xaaaadebf0c08,
-    0xaaaadebf0c1c,
-    0xaaaadebf1bbc,
-    0xaaaadebf1c18,
-};
-
-constexpr Addr kTrackedUserBblStarts[] = {
-    0xaaaadebf2150,
-    0xaaaadebf2170,
-    0xaaaadebf2184,
-    0xaaaadebf20d4,
-    0xaaaadebf0e40,
-    0xaaaadebf0f3c,
-    0xaaaadebf0c00,
-    0xaaaadebf0c14,
-    0xaaaadebf1bb0,
-    0xaaaadebf1c04,
-};
-
-template <size_t N>
-bool
-containsTrackedAddr(const Addr (&addrs)[N], Addr value)
-{
-    for (Addr addr : addrs) {
-        if (addr == value) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool
-isTrackedKernelBranch(Addr value)
-{
-    return containsTrackedAddr(kTrackedKernelBranchPcs, value);
-}
-
-bool
-isTrackedKernelBblStart(Addr value)
-{
-    return containsTrackedAddr(kTrackedKernelBblStarts, value);
-}
-
-bool
-isTrackedUserBranch(Addr value)
-{
-    return containsTrackedAddr(kTrackedUserBranchPcs, value);
-}
-
-bool
-isTrackedUserBblStart(Addr value)
-{
-    return containsTrackedAddr(kTrackedUserBblStarts, value);
-}
-
-} // anonymous namespace
-
-const char *
-btbFillSourceName(BTBFillSource source)
-{
-    switch (source) {
-      case BTBFillSource::None:
-        return "None";
-      case BTBFillSource::FetchDirect:
-        return "FetchDirect";
-      case BTBFillSource::FetchNondirect:
-        return "FetchNondirect";
-      case BTBFillSource::PredecodeDirect:
-        return "PredecodeDirect";
-      case BTBFillSource::ResolveControl:
-        return "ResolveControl";
-      case BTBFillSource::Restore:
-        return "Restore";
-    }
-
-    return "Unknown";
-}
-
 char
 btbFillSourceTraceChar(BTBFillSource source)
 {
@@ -319,26 +205,6 @@ DefaultBTB::valid(Addr instPC, ThreadID tid)
     const int way = findWay(set, inst_tag, tid);
     const bool hit = way >= 0;
 
-    if ((instPC == kTrackedBTBAddr ||
-         isTrackedKernelBblStart(instPC) ||
-         isTrackedUserBblStart(instPC)) &&
-        tid == 0) {
-        warn("TRACKED_BTB valid(%#x) -> %s at set=%u tag=%#x hit_way=%d ways=%u",
-             instPC, hit ? "hit" : "miss", set, inst_tag, way, numWays);
-        for (unsigned tracked_way = 0; tracked_way < numWays; ++tracked_way) {
-            const unsigned idx = getEntryIndex(set, tracked_way);
-            const BTBEntry &entry = btb[idx];
-            warn("TRACKED_BTB set=%u way=%u idx=%u valid=%d tag=%#x branch=%#x source=%s",
-                 set,
-                 tracked_way,
-                 idx,
-                 entry.valid,
-                 entry.tag,
-                 entry.valid ? entry.branch.instAddr() : 0,
-                 btbFillSourceName(entry.fillSource));
-        }
-    }
-
     return hit;
 }
 
@@ -471,47 +337,6 @@ DefaultBTB::update(Addr instPC, const StaticInstPtr &staticBranchInst,
 
     assert(btb_idx < numEntries);
 
-    const bool touchesTrackedSlot =
-        (tid == 0) &&
-        (btb_idx == kTrackedBTBIndex ||
-         instPC == kTrackedBTBAddr ||
-         isTrackedKernelBblStart(instPC) ||
-         isTrackedUserBblStart(instPC) ||
-         isTrackedKernelBranch(branch.instAddr()) ||
-         isTrackedUserBranch(branch.instAddr()) ||
-         (btb[btb_idx].valid &&
-          btb[btb_idx].tag == kTrackedBTBTag &&
-          btb[btb_idx].tid == 0));
-    if (touchesTrackedSlot) {
-        warn(
-            "TRACKED_BTB update set=%u way=%d idx=%u instPC=%#x branch=%#x bblSize=%llu "
-            "target=%#x ft=%#x uncond=%d source=%s inst_flags[ctrl=%d "
-            "direct=%d cond=%d uncond=%d call=%d ret=%d macro=%d micro=%d] "
-            "old_valid=%d old_tag=%#x old_branch=%#x old_source=%s",
-            set,
-            way,
-            btb_idx,
-            instPC,
-            branch.instAddr(),
-            (unsigned long long)bblSize,
-            target.instAddr(),
-            ft.instAddr(),
-            uncond,
-            btbFillSourceName(source),
-            staticBranchInst ? staticBranchInst->isControl() : 0,
-            staticBranchInst ? staticBranchInst->isDirectCtrl() : 0,
-            staticBranchInst ? staticBranchInst->isCondCtrl() : 0,
-            staticBranchInst ? staticBranchInst->isUncondCtrl() : 0,
-            staticBranchInst ? staticBranchInst->isCall() : 0,
-            staticBranchInst ? staticBranchInst->isReturn() : 0,
-            staticBranchInst ? staticBranchInst->isMacroop() : 0,
-            staticBranchInst ? staticBranchInst->isMicroop() : 0,
-            btb[btb_idx].valid,
-            btb[btb_idx].tag,
-            btb[btb_idx].valid ? btb[btb_idx].branch.instAddr() : 0,
-            btbFillSourceName(btb[btb_idx].fillSource));
-    }
-
     btb[btb_idx].tid = tid;
     btb[btb_idx].valid = true;
     btb[btb_idx].staticBranchInst = staticBranchInst;
@@ -522,17 +347,6 @@ DefaultBTB::update(Addr instPC, const StaticInstPtr &staticBranchInst,
     btb[btb_idx].tag = getTag(instPC);
     btb[btb_idx].uncond = uncond;
     btb[btb_idx].fillSource = source;
-
-    if (touchesTrackedSlot) {
-        warn(
-            "TRACKED_BTB post-update set=%u way=%d idx=%u tag=%#x branch=%#x source=%s",
-            set,
-            way,
-            btb_idx,
-            btb[btb_idx].tag,
-            btb[btb_idx].branch.instAddr(),
-            btbFillSourceName(btb[btb_idx].fillSource));
-    }
 }
 
 } // namespace branch_prediction
