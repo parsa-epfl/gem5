@@ -114,6 +114,8 @@ std::deque<int> prefetchQueueBblSize[FTQ_MAX_SIZE];
 TheISA::PCState prevPC[FTQ_MAX_SIZE];
 std::deque<InstSeqNum> prefetchQueueSeqNum[FTQ_MAX_SIZE];
 std::deque<TheISA::PCState> prefetchQueueBr[FTQ_MAX_SIZE];
+std::deque<branch_prediction::BTBFillSource>
+    prefetchQueueBtbSource[FTQ_MAX_SIZE];
 
 
 Fetch::IcachePort::IcachePort(Fetch *_fetch, CPU *_cpu) :
@@ -206,7 +208,6 @@ Fetch::Fetch(CPU *_cpu, const O3CPUParams &params)
         lastIcacheStall[i] = 0;
         issuePipelinedIfetch[i] = false;
         pendingPredecodeRecovery[i] = false;
-        lastBblProbeResult[i] = '-';
         seq[i] = 1;
         brseq[i] = 0;
     }
@@ -429,6 +430,7 @@ Fetch::clearStates(ThreadID tid)
     prefetchQueueBblSize[tid].clear();
     prefetchQueueSeqNum[tid].clear();
     prefetchQueueBr[tid].clear();
+    prefetchQueueBtbSource[tid].clear();
     prefetchBufferPC[tid].clear();
     prefetchBufferActualPC[tid].clear();
     pendingPredecodeRecovery[tid] = false;
@@ -483,6 +485,7 @@ Fetch::resetStage()
         prefetchQueueBblSize[tid].clear();
         prefetchQueueSeqNum[tid].clear();
         prefetchQueueBr[tid].clear();
+        prefetchQueueBtbSource[tid].clear();
         prefetchBufferPC[tid].clear();
         prefetchBufferActualPC[tid].clear();
 
@@ -912,7 +915,6 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
     ThreadID tid = inst->threadNumber;
     TheISA::PCState thisPC = nextPC;
     TheISA::PCState ftPC = nextPC;
-    const Addr currentBblAddr = bblAddr[tid];
     inst->staticInst->advancePC(ftPC);
 
     // The next PC to access.
@@ -944,12 +946,15 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
     TheISA::PCState branchPC, tempPC;
     bool predictorInvoked = false;
     char frontendPath = '-';
-    const char rawBblProbe = lastBblProbeResult[tid];
-    char effectiveBblProbe = rawBblProbe;
-    const bool archBtbEligibleControl = inst->isControl() && !inst->isMicroop();
+    char effectiveBblProbe = '-';
+    const bool archBtbEligibleControl =
+        inst->isControl() && !inst->isMicroop();
     const bool queuedChainContinuation =
         !prefetchQueue[tid].empty() &&
         inst->instAddr() < prefetchQueueBr[tid].front().instAddr();
+
+    inst->isBTBMiss = false;
+    inst->btbFillSource = branch_prediction::BTBFillSource::None;
 
     // Pre-decode branch instruction and update BTB.
     if (enableFDIP) {
@@ -1014,6 +1019,8 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
         const TheISA::PCState queuedTarget = prefetchQueue[tid].front();
         const TheISA::PCState queuedBranch = prefetchQueueBr[tid].front();
         const InstSeqNum queuedSeq = prefetchQueueSeqNum[tid].front();
+        const branch_prediction::BTBFillSource queuedSource =
+            prefetchQueueBtbSource[tid].front();
 
         if (queuedBranch.instAddr() == inst->instAddr()) {
             tempPC = queuedTarget;
@@ -1024,7 +1031,11 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
             prefetchQueueSeqNum[tid].pop_front();
             branchPC = queuedBranch;
             prefetchQueueBr[tid].pop_front();
+            prefetchQueueBtbSource[tid].pop_front();
             predict_taken = nextPC.npc() != tempPC.instAddr();
+            inst->isBTBMiss = false;
+            inst->btbFillSource = queuedSource;
+            effectiveBblProbe = 'H';
         } else if (inst->instAddr() < queuedBranch.instAddr()) {
             /*
              * We are still executing inside a previously predicted basic
@@ -1036,6 +1047,9 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
             branchPC = queuedBranch;
             tempPC = ftPC;
             predict_taken = false;
+            inst->isBTBMiss = false;
+            inst->btbFillSource = queuedSource;
+            effectiveBblProbe = 'H';
         } else {
             frontendPath = 'F';
             branchPC = queuedBranch;
@@ -1044,6 +1058,7 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
             prefetchQueueBblSize[tid].clear();
             prefetchQueueSeqNum[tid].clear();
             prefetchQueueBr[tid].clear();
+            prefetchQueueBtbSource[tid].clear();
 
             tempPC = nextPC;
             predict_taken = branchPred->predict(inst->staticInst, seq[tid],
@@ -1051,6 +1066,9 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
             brseq[tid] = seq[tid];
             seq[tid]++;
             prefPC[tid] = tempPC;
+            inst->isBTBMiss = true;
+            inst->btbFillSource = branch_prediction::BTBFillSource::None;
+            effectiveBblProbe = 'M';
 
             DPRINTF(Fetch, "Nayana mismatch %#x, %#x\n", queuedBranch.instAddr(), inst->instAddr());
             if(enableFDIP){
@@ -1070,6 +1088,9 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
                                       bblAddr[tid], tempPC, tid);
         brseq[tid] = seq[tid];
         seq[tid]++;
+        inst->isBTBMiss = true;
+        inst->btbFillSource = branch_prediction::BTBFillSource::None;
+        effectiveBblProbe = 'M';
         //assert(false && "branchpred called from fetch\n");
 
         if(enableFDIP){
@@ -1141,23 +1162,6 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
             tid, inst->seqNum, inst->pcState().instAddr(), nextPC);
     inst->setPredTarg(nextPC);
     inst->setPredTaken(predict_taken);
-    inst->isBTBConsulted = branchPred->isBTBConsulted(brseq[tid], tid);
-    inst->isBTBMiss = branchPred->isBTBMiss(brseq[tid], tid);
-    inst->btbFillSource = branchPred->getBTBSource(brseq[tid], tid);
-
-    if (inst->isDirectCtrl()) {
-        if (frontendPath == 'B') {
-            inst->isBTBConsulted = true;
-            inst->isBTBMiss = false;
-            inst->btbFillSource = branchPred->getBblSource(currentBblAddr, tid);
-            effectiveBblProbe = 'H';
-        } else if (frontendPath == 'F') {
-            inst->isBTBConsulted = true;
-            inst->isBTBMiss = true;
-            inst->btbFillSource = branch_prediction::BTBFillSource::None;
-            effectiveBblProbe = 'M';
-        }
-    }
 
     inst->frontendPath = frontendPath;
     inst->bblProbe = effectiveBblProbe;
@@ -1195,6 +1199,7 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
         prefetchQueueBblSize[tid].clear();
         prefetchQueueSeqNum[tid].clear();
         prefetchQueueBr[tid].clear();
+        prefetchQueueBtbSource[tid].clear();
         lastProcessedLine = 0;
         //Fix this later
         lastAddrFetched = prefetchBufferPC[tid].front(); 
@@ -1306,6 +1311,7 @@ Fetch::fetchCacheLine(Addr vaddr, ThreadID tid, Addr pc)
         prefetchQueueBblSize[tid].clear();
         prefetchQueueSeqNum[tid].clear();
         prefetchQueueBr[tid].clear();
+        prefetchQueueBtbSource[tid].clear();
         prefetchBufferPC[tid].clear();
         prefetchBufferActualPC[tid].clear();
         cleanupFetchBuffer(fetchBuffer[tid].begin(),fetchBuffer[tid].end());
@@ -1685,6 +1691,7 @@ Fetch::doSquash(const TheISA::PCState &newPC, const DynInstPtr squashInst,
         prefetchQueueBblSize[tid].clear();
         prefetchQueueSeqNum[tid].clear();
         prefetchQueueBr[tid].clear();
+        prefetchQueueBtbSource[tid].clear();
         prefetchBufferPC[tid].clear();
         prefetchBufferActualPC[tid].clear();
         DPRINTF(Fetch, "[tid:%i] Squashing, prefetch Queue to size: %d.\n",
@@ -2283,11 +2290,9 @@ Fetch::predictNextBasicBlock(TheISA::PCState prefetchPc, TheISA::PCState &branch
     uint64_t &btbMisPred = std::get<1>(btbConf);
     btbTotal++;
     if (!branchPred->getBblValid(prefetchPc.instAddr(), tid)) {
-        lastBblProbeResult[tid] = 'M';
         btbMisPred++;
         return 0;
     }
-    lastBblProbeResult[tid] = 'H';
     //if ((prefetchPc.instAddr() & 0xff000000) != 0) {
     //    return 0;
     //}
@@ -2807,6 +2812,8 @@ Fetch::addToFTQ()
     assert(prefetchQueue[tid].size() == prefetchQueueBblSize[tid].size() && "pref size mismatch");
     assert(prefetchQueue[tid].size() == prefetchQueueSeqNum[tid].size() && "pref size mismatch");
     assert(prefetchQueue[tid].size() == prefetchQueueBr[tid].size() && "pref size mismatch");
+    assert(prefetchQueue[tid].size() == prefetchQueueBtbSource[tid].size() &&
+           "pref size mismatch");
 
     // Keep issuing while prefetchQueue is available
     while (prefetchQueue[tid].size() < ftqSize) {
@@ -2859,6 +2866,8 @@ Fetch::addToFTQ()
             prefetchQueueBblSize[tid].push_back(branchPC.instAddr() - thisPC.instAddr());
             prefetchQueueSeqNum[tid].push_back(seq[tid]);
             prefetchQueueBr[tid].push_back(branchPC);
+            prefetchQueueBtbSource[tid].push_back(
+                branchPred->getBblSource(thisPC.instAddr(), tid));
             seq[tid]++;
             DPRINTF(Fetch, "[tid:%i] Prefetch queue entry created (%i/%i) %s %s.\n",
                     tid, prefetchQueue[tid].size(), prefetchQueueSize, prefetchQueue[tid].front(), nextPC);

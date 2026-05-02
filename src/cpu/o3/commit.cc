@@ -218,20 +218,58 @@ Commit::CommitStats::CommitStats(CPU *cpu, Commit *commit)
                "Number of function calls committed."),
       ADD_STAT(committedInstType, statistics::units::Count::get(),
                "Class of committed instruction"),
-      ADD_STAT(directControlTransferBTBNotConsulted, statistics::units::Count::get(),
-               "Number of committed direct branches whose resolved PC state transfers control and bypassed BTB consultation."),
+      ADD_STAT(committedControlBranches, statistics::units::Count::get(),
+               "Number of committed control instructions."),
+      ADD_STAT(committedControlBTBHit, statistics::units::Count::get(),
+               "Number of committed control instructions delivered by the "
+               "FDIP BBL chain."),
+      ADD_STAT(committedControlBTBMiss, statistics::units::Count::get(),
+               "Number of committed control instructions delivered through "
+               "fallback after the FDIP BBL chain failed."),
+      ADD_STAT(committedControlDirectionCorrect,
+               statistics::units::Count::get(),
+               "Number of committed control instructions whose direction "
+               "prediction was correct."),
+      ADD_STAT(committedControlDirectionIncorrect,
+               statistics::units::Count::get(),
+               "Number of committed control instructions whose direction "
+               "prediction was incorrect."),
+      ADD_STAT(committedControlTargetCorrect, statistics::units::Count::get(),
+               "Number of committed control instructions whose predicted next "
+               "PC matched the resolved next PC."),
+      ADD_STAT(committedControlTargetIncorrect,
+               statistics::units::Count::get(),
+               "Number of committed control instructions whose predicted next "
+               "PC differed from the resolved next PC."),
       ADD_STAT(directControlTransferBTBMiss, statistics::units::Count::get(),
-               "Number of committed direct branches whose resolved PC state transfers control and whose BTB consult missed."),
-      ADD_STAT(directControlTransferBTBHitFetchDirect, statistics::units::Count::get(),
-               "Number of committed direct branches whose resolved PC state transfers control and whose BTB hit came from FetchDirect fill."),
-      ADD_STAT(directControlTransferBTBHitFetchNondirect, statistics::units::Count::get(),
-               "Number of committed direct branches whose resolved PC state transfers control and whose BTB hit came from FetchNondirect fill."),
-      ADD_STAT(directControlTransferBTBHitPredecodeDirect, statistics::units::Count::get(),
-               "Number of committed direct branches whose resolved PC state transfers control and whose BTB hit came from PredecodeDirect fill."),
-      ADD_STAT(directControlTransferBTBHitResolveControl, statistics::units::Count::get(),
-               "Number of committed direct branches whose resolved PC state transfers control and whose BTB hit came from ResolveControl fill."),
-      ADD_STAT(directControlTransferBTBHitRestore, statistics::units::Count::get(),
-               "Number of committed direct branches whose resolved PC state transfers control and whose BTB hit came from Restore fill."),
+               "Number of committed direct branches whose resolved PC state "
+               "transfers control and arrived via fallback after the BBL "
+               "chain missed."),
+      ADD_STAT(directControlTransferBTBHitFetchDirect,
+               statistics::units::Count::get(),
+               "Number of committed direct branches whose resolved PC state "
+               "transfers control and arrived via a BBL-chain hit sourced "
+               "from FetchDirect fill."),
+      ADD_STAT(directControlTransferBTBHitFetchNondirect,
+               statistics::units::Count::get(),
+               "Number of committed direct branches whose resolved PC state "
+               "transfers control and arrived via a BBL-chain hit sourced "
+               "from FetchNondirect fill."),
+      ADD_STAT(directControlTransferBTBHitPredecodeDirect,
+               statistics::units::Count::get(),
+               "Number of committed direct branches whose resolved PC state "
+               "transfers control and arrived via a BBL-chain hit sourced "
+               "from PredecodeDirect fill."),
+      ADD_STAT(directControlTransferBTBHitResolveControl,
+               statistics::units::Count::get(),
+               "Number of committed direct branches whose resolved PC state "
+               "transfers control and arrived via a BBL-chain hit sourced "
+               "from ResolveControl fill."),
+      ADD_STAT(directControlTransferBTBHitRestore,
+               statistics::units::Count::get(),
+               "Number of committed direct branches whose resolved PC state "
+               "transfers control and arrived via a BBL-chain hit sourced "
+               "from Restore fill."),
       ADD_STAT(commitEligibleSamples, statistics::units::Cycle::get(),
                "number cycles where commit BW limit reached")
 {
@@ -301,7 +339,17 @@ Commit::CommitStats::CommitStats(CPU *cpu, Commit *commit)
         .init(commit->numThreads)
         .flags(total);
 
-    directControlTransferBTBNotConsulted.prereq(directControlTransferBTBNotConsulted);
+    committedControlBranches.prereq(committedControlBranches);
+    committedControlBTBHit.prereq(committedControlBTBHit);
+    committedControlBTBMiss.prereq(committedControlBTBMiss);
+    committedControlDirectionCorrect.prereq(
+        committedControlDirectionCorrect);
+    committedControlDirectionIncorrect.prereq(
+        committedControlDirectionIncorrect);
+    committedControlTargetCorrect.prereq(committedControlTargetCorrect);
+    committedControlTargetIncorrect.prereq(
+        committedControlTargetIncorrect);
+
     directControlTransferBTBMiss.prereq(directControlTransferBTBMiss);
     directControlTransferBTBHitFetchDirect.prereq(directControlTransferBTBHitFetchDirect);
     directControlTransferBTBHitFetchNondirect.prereq(directControlTransferBTBHitFetchNondirect);
@@ -1504,18 +1552,41 @@ Commit::commitHead(const DynInstPtr &head_inst, unsigned inst_num)
     }
 
     if(head_inst->isControl()){
+        ++stats.committedControlBranches;
         const char resolvedControlTransfer =
             head_inst->pcState().branching() ? 'T' : 'N';
-        const char btbState = !head_inst->isBTBConsulted ? 'N' :
-            (head_inst->isBTBMiss ? 'M' : 'H');
+        const char btbState = head_inst->isBTBMiss ? 'M' : 'H';
         const char btbSource =
             branch_prediction::btbFillSourceTraceChar(head_inst->btbFillSource);
         const char frontendPath = head_inst->frontendPath;
         const char bblProbe = head_inst->bblProbe;
+        const bool directionCorrect =
+            head_inst->readPredTaken() == head_inst->pcState().branching();
+        TheISA::PCState resolvedNextPC = head_inst->pcState();
+        head_inst->staticInst->advancePC(resolvedNextPC);
+        const bool targetCorrect =
+            head_inst->readPredTarg() == resolvedNextPC;
+
+        if (head_inst->isBTBMiss) {
+            ++stats.committedControlBTBMiss;
+        } else {
+            ++stats.committedControlBTBHit;
+        }
+
+        if (directionCorrect) {
+            ++stats.committedControlDirectionCorrect;
+        } else {
+            ++stats.committedControlDirectionIncorrect;
+        }
+
+        if (targetCorrect) {
+            ++stats.committedControlTargetCorrect;
+        } else {
+            ++stats.committedControlTargetIncorrect;
+        }
+
         if (head_inst->isDirectCtrl() && resolvedControlTransfer == 'T') {
-            if (!head_inst->isBTBConsulted) {
-                ++stats.directControlTransferBTBNotConsulted;
-            } else if (head_inst->isBTBMiss) {
+            if (head_inst->isBTBMiss) {
                 ++stats.directControlTransferBTBMiss;
             } else {
                 switch (head_inst->btbFillSource) {
