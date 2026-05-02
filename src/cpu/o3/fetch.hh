@@ -75,6 +75,8 @@ class CPU;
 extern std::deque<TheISA::PCState> prefetchQueue[FTQ_MAX_SIZE];
 extern std::deque<InstSeqNum> prefetchQueueSeqNum[FTQ_MAX_SIZE];
 extern std::deque<TheISA::PCState> prefetchQueueBr[FTQ_MAX_SIZE];
+extern std::deque<branch_prediction::BTBFillSource>
+    prefetchQueueBtbSource[FTQ_MAX_SIZE];
 
 /**
  * Fetch class handles both single threaded and SMT fetch. Its
@@ -612,8 +614,6 @@ class Fetch
     bool issuePipelinedIfetch[MaxThreads];
     /** One-shot latch to predecode the recovered line after fallback. */
     bool pendingPredecodeRecovery[MaxThreads];
-    /** Last basic-block BTB probe result seen by each thread. */
-    char lastBblProbeResult[MaxThreads];
 
     /** Event used to delay fault generation of translation faults */
     FinishTranslationEvent finishTranslationEvent;

@@ -228,10 +228,6 @@ class BPredUnit : public SimObject
 
     void dump();
     
-    bool isBTBMiss(const InstSeqNum seq_num, ThreadID tid);
-    bool isBTBConsulted(const InstSeqNum seq_num, ThreadID tid);
-    BTBFillSource getBTBSource(const InstSeqNum seq_num, ThreadID tid);
-
     void restoreBTBFromFile();
 
   private:
@@ -252,7 +248,6 @@ class BPredUnit : public SimObject
               indirectHistory(indirect_history), RASTarget(0), RASIndex(0),
               tid(_tid), predTaken(pred_taken), usedRAS(0), pushedRAS(0),
               wasCall(0), wasReturn(0), wasIndirect(0),
-              wasBTBConsulted(0), wasBTBMiss(0),
               btbSource(BTBFillSource::None), target(MaxAddr),
               inst(inst)
         {}
@@ -267,7 +262,6 @@ class BPredUnit : public SimObject
               indirectHistory(indirect_history), RASTarget(0), RASIndex(0),
               tid(_tid), predTaken(pred_taken), usedRAS(0), pushedRAS(0),
               wasCall(0), wasReturn(0), wasIndirect(0),
-              wasBTBConsulted(0), wasBTBMiss(0),
               btbSource(BTBFillSource::None),
               target(MaxAddr), inst(inst), bbladdr(bbladdr)
         {}
@@ -316,11 +310,6 @@ class BPredUnit : public SimObject
 
         /** Wether this instruction was an indirect branch */
         bool wasIndirect;
-
-        /** Whether the BTB was actually consulted. */
-        bool wasBTBConsulted;
-
-        bool wasBTBMiss;
 
         BTBFillSource btbSource;
 
@@ -381,10 +370,6 @@ class BPredUnit : public SimObject
         statistics::Scalar bblBTBLookups;
         statistics::Scalar bblBTBHits;
         statistics::Scalar bblBTBMisses;
-        /** Branch-instance-level BTB lookup activity. */
-        statistics::Scalar branchBTBLookups;
-        statistics::Scalar branchBTBHits;
-        statistics::Scalar branchBTBMisses;
         /** Stat for number of times the RAS is used to get a target. */
         statistics::Scalar RASUsed;
         /** Stat for number of times the RAS is incorrect. */

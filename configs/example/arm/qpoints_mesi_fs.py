@@ -56,6 +56,13 @@ def normalize_args(args):
     args.cpu_type = "O3CPU"
     args.ruby = True
 
+    if not args.fdip:
+        m5.util.warn(
+            "FDIP is disabled: the frontend runs in decode-discovery mode "
+            "and does not use the BTB for branch discovery or basic-block "
+            "chaining."
+        )
+
     # QPoints uses --num-cores; Ruby expects --num-cpus.
     args.num_cpus = args.num_cores
 

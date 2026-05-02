@@ -1134,13 +1134,12 @@ class DynInst : public ExecContext, public RefCounted
     bool squashedFromThisInst = false;
     bool isStalled = false;
     char mispred = 0;
-    bool isBTBConsulted = false;
     bool isBTBMiss = false;
     branch_prediction::BTBFillSource btbFillSource =
         branch_prediction::BTBFillSource::None;
     /** 'B' = basic-block/FTQ path, 'F' = fallback decode path, '-' unknown. */
     char frontendPath = '-';
-    /** 'H' = prior BBL probe hit, 'M' = prior BBL probe miss, '-' unknown. */
+    /** 'H' = branch arrived from a successful BBL chain, 'M' = fallback. */
     char bblProbe = '-';
     bool isPredictable = false;
 

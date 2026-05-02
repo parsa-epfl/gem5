@@ -334,12 +334,6 @@ BPredUnit::BPredUnitStats::BPredUnitStats(statistics::Group *parent)
                "Number of basic-block BTB hits."),
       ADD_STAT(bblBTBMisses, statistics::units::Count::get(),
                "Number of basic-block BTB misses."),
-      ADD_STAT(branchBTBLookups, statistics::units::Count::get(),
-               "Number of branch-instance BTB lookups."),
-      ADD_STAT(branchBTBHits, statistics::units::Count::get(),
-               "Number of branch-instance BTB hits."),
-      ADD_STAT(branchBTBMisses, statistics::units::Count::get(),
-               "Number of branch-instance BTB misses."),
       ADD_STAT(RASUsed, statistics::units::Count::get(),
                "Number of times the RAS was used to get a target."),
       ADD_STAT(RASIncorrect, statistics::units::Count::get(),
@@ -546,13 +540,10 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
             }
 
             if (inst->isDirectCtrl() || !iPred) {
-                predict_record.wasBTBConsulted = true;
                 ++stats.BTBLookups;
-                ++stats.branchBTBLookups;
                 // Check BTB on direct branches
                 if (BTB.valid(pc.instAddr(), tid)) {
                     ++stats.BTBHits;
-                    ++stats.branchBTBHits;
                     predict_record.btbSource =
                         BTB.lookupSource(pc.instAddr(), tid);
                     // If it's not a return, use the BTB to get target addr.
@@ -562,12 +553,10 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
                             "target is %s\n",
                             tid, seqNum, pc, target);
                 } else {
-                    ++stats.branchBTBMisses;
                     DPRINTF(Branch, "[tid:%i] [sn:%llu] BTB doesn't have a "
                             "valid entry\n",tid,seqNum);
                     pred_taken = false;
                     predict_record.predTaken = pred_taken;
-                    predict_record.wasBTBMiss = true;
                     // The Direction of the branch predictor is altered
                     // because the BTB did not have an entry
                     // The predictor needs to be updated accordingly
@@ -738,20 +727,15 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
                 // BTB lookup code commented for reference and use the decoded
                 // direct target instead.
                 //
-                // predict_record.wasBTBConsulted = true;
                 // ++stats.BTBLookups;
-                // ++stats.branchBTBLookups;
                 // if (BTB.valid(bbladdr, tid)) {
                 //     ++stats.BTBHits;
-                //     ++stats.branchBTBHits;
                 //     predict_record.btbSource =
                 //         BTB.lookupSource(bbladdr, tid);
                 //     target = BTB.lookup(bbladdr, tid);
                 // } else {
-                //     ++stats.branchBTBMisses;
                 //     pred_taken = false;
                 //     predict_record.predTaken = pred_taken;
-                //     predict_record.wasBTBMiss = true;
                 //     if (!inst->isCall() && !inst->isReturn()) {
                 //         btbUpdate(tid, pc.instAddr(), bp_history);
                 //     } else if (inst->isCall() && !inst->isUncondCtrl()) {
@@ -1242,42 +1226,6 @@ BPredUnit::dump()
             cprintf("\n");
         }
     }
-}
-
-bool 
-BPredUnit::isBTBMiss(const InstSeqNum seq_num, ThreadID tid){
-        History &pred_hist = predHist[tid];
-        History::iterator it = pred_hist.begin();
-        for(;it != pred_hist.end(); it++){
-          if(it->seqNum == seq_num){
-            return it->wasBTBMiss;
-          }
-        }
-        return false;
-}
-
-bool
-BPredUnit::isBTBConsulted(const InstSeqNum seq_num, ThreadID tid){
-        History &pred_hist = predHist[tid];
-        History::iterator it = pred_hist.begin();
-        for(;it != pred_hist.end(); it++){
-          if(it->seqNum == seq_num){
-            return it->wasBTBConsulted;
-          }
-        }
-        return false;
-}
-
-BTBFillSource
-BPredUnit::getBTBSource(const InstSeqNum seq_num, ThreadID tid){
-        History &pred_hist = predHist[tid];
-        History::iterator it = pred_hist.begin();
-        for(;it != pred_hist.end(); it++){
-          if(it->seqNum == seq_num){
-            return it->btbSource;
-          }
-        }
-        return BTBFillSource::None;
 }
 
 } // namespace branch_prediction
