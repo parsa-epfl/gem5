@@ -62,6 +62,10 @@ def discover_llc_restore_file(options):
     if not getattr(options, "restore_llc_state", False):
         return None
 
+    # Deferred follow-up: the current validated path migrates to a single
+    # nested gem5_uarch directory. Per-component fallback across mixed nested
+    # and legacy sibling layouts is intentionally left for a separate cleanup
+    # pass so we do not perturb the reproduced restore flow here.
     if not getattr(options, "restore", None):
         m5.util.warn(
             "--restore-llc-state was set without --restore; "
