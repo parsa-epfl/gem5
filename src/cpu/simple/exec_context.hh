@@ -71,6 +71,7 @@ class SimpleExecContext : public ExecContext
 
     // Branch prediction
     TheISA::PCState predPC;
+    bool predTaken = false;
 
     /** PER-THREAD STATS */
     Counter numInst;

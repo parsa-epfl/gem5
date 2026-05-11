@@ -92,6 +92,24 @@ def define_options(parser):
             "Restore direct BTB entries discovered from checkpoint metadata "
             "if available"
         ))
+    parser.add_argument(
+        "--restore-tage-state", action="store_true", default=False,
+        help=(
+            "Restore TAGE direction-predictor state discovered from "
+            "checkpoint metadata if available"
+        ))
+    parser.add_argument(
+        "--tage-decision-trace", action="store_true", default=False,
+        help=(
+            "Log compact per-conditional TAGE decision records for "
+            "debugging and cross-checking against QFlex"
+        ))
+    parser.add_argument(
+        "--tage-decision-trace-limit", action="store", type=int, default=0,
+        help=(
+            "Maximum number of per-core conditional TAGE decisions "
+            "to log (0 = unlimited)"
+        ))
 
     # Options related to cache structure
     parser.add_argument(

@@ -81,17 +81,43 @@
 namespace gem5
 {
 
+namespace
+{
+
+int
+branchTraceType(const StaticInstPtr &inst)
+{
+    if (inst->isCondCtrl()) {
+        return 0;
+    }
+    if (inst->isCall() && inst->isDirectCtrl()) {
+        return 2;
+    }
+    if (inst->isReturn()) {
+        return 3;
+    }
+    if (inst->isCall() && inst->isIndirectCtrl()) {
+        return 5;
+    }
+    if (inst->isIndirectCtrl()) {
+        return 4;
+    }
+    return 1;
+}
+
+} // anonymous namespace
+
 BaseSimpleCPU::BaseSimpleCPU(const BaseSimpleCPUParams &p)
     : BaseCPU(p),
       curThread(0),
       branchPred(p.branchPred),
       zeroReg(p.isa[0]->regClasses().at(IntRegClass).zeroReg()),
-      traceData(NULL),
       branchTraceEnable(p.branch_trace_enable),
       branchTraceStream(nullptr),
       dataTraceEnable(p.data_trace_enable),
       dataTraceStream(nullptr),
       lastInstAddr(0),
+      traceData(NULL),
       _status(Idle)
 {
     SimpleThread *thread;
@@ -128,6 +154,9 @@ BaseSimpleCPU::BaseSimpleCPU(const BaseSimpleCPUParams &p)
         const std::string fname = csprintf(
             "branch_trace_core_%d.log", cpuId());
         branchTraceStream = simout.findOrCreate(fname)->stream();
+        ccprintf(
+            *branchTraceStream,
+            "branch_pc,branch_type,predicted_direction,actual_direction\n");
     }
 
     if (dataTraceEnable) {
@@ -423,6 +452,7 @@ BaseSimpleCPU::preExecute()
         const bool predict_taken(
             branchPred->predict(curStaticInst, cur_sn, t_info.predPC,
                                 curThread));
+        t_info.predTaken = predict_taken;
 
         if (predict_taken)
             ++t_info.execContextStats.numPredictedBranches;
@@ -449,10 +479,6 @@ BaseSimpleCPU::postExecute()
 
     if (curStaticInst->isControl()) {
         ++t_info.execContextStats.numBranches;
-        if (branchTraceEnable && branchTraceStream) {
-            ccprintf(*branchTraceStream, "%llu\n",
-                     static_cast<unsigned long long>(lastInstAddr));
-        }
     }
 
     /* Power model statistics */
@@ -535,6 +561,15 @@ BaseSimpleCPU::advancePC(const Fault &fault)
     }
 
     if (branchPred && curStaticInst && curStaticInst->isControl()) {
+        if (branchTraceEnable && branchTraceStream) {
+            ccprintf(
+                *branchTraceStream,
+                "%llx,%d,%d,%d\n",
+                static_cast<unsigned long long>(tempPCState.instAddr()),
+                branchTraceType(curStaticInst),
+                t_info.predTaken ? 1 : 0,
+                branching ? 1 : 0);
+        }
         // Use a fake sequence number since we only have one
         // instruction in flight at the same time.
         const InstSeqNum cur_sn(0);

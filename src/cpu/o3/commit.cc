@@ -80,6 +80,32 @@ namespace gem5
 namespace o3
 {
 
+namespace
+{
+
+int
+branchTraceType(const DynInstPtr &inst)
+{
+    if (inst->isCondCtrl()) {
+        return 0;
+    }
+    if (inst->isCall() && inst->isDirectCtrl()) {
+        return 2;
+    }
+    if (inst->isReturn()) {
+        return 3;
+    }
+    if (inst->isCall() && inst->isIndirectCtrl()) {
+        return 5;
+    }
+    if (inst->isIndirectCtrl()) {
+        return 4;
+    }
+    return 1;
+}
+
+} // anonymous namespace
+
 void
 Commit::processTrapEvent(ThreadID tid)
 {
@@ -127,6 +153,8 @@ Commit::Commit(CPU *_cpu, const O3CPUParams &params)
         const std::string fname = csprintf(
             "branch_trace_core_%d.log", cpu->cpuId());
         branchTraceStream = simout.findOrCreate(fname)->stream();
+        (*branchTraceStream)
+            << "branch_pc,branch_type,predicted_direction,actual_direction\n";
     }
 
     if (commitPolicy == CommitPolicy::RoundRobin) {
@@ -1611,22 +1639,15 @@ Commit::commitHead(const DynInstPtr &head_inst, unsigned inst_num)
             }
         }
         if (branchTraceEnable && branchTraceStream) {
+            const int type = branchTraceType(head_inst);
+            const int predictedDirection = head_inst->readPredTaken() ? 1 : 0;
+            const int actualDirection =
+                head_inst->pcState().branching() ? 1 : 0;
             (*branchTraceStream)
-                << head_inst->seqNum << ' '
-                << instCount << ' '
-                << "0x" << std::hex << head_inst->instAddr() << std::dec << ' '
-                << resolvedControlTransfer << ' '
-                << (head_inst->mispredicted() ? 'T' : 'F') << ' '
-                << btbState << ' '
-                << btbSource << ' '
-                << frontendPath << ' '
-                << bblProbe << ' '
-                << (head_inst->isIndirectCtrl() ? 'I' : 'D') << ' '
-#if THE_ISA == ARM_ISA
-                << thread[tid]->getTC()->readMiscReg(ArmISA::MISCREG_TPIDR_EL0)
-#else
-                << 0
-#endif
+                << std::hex << head_inst->instAddr() << std::dec << ','
+                << type << ','
+                << predictedDirection << ','
+                << actualDirection
                 << '\n';
         }
         DPRINTFR(MispredCommTrace, "%llu %llu 0x%llx %c %c %c %c %c %c %c %llu\n",
