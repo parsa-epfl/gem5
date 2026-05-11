@@ -887,6 +887,7 @@ machine(MachineType:L1Cache, "MESI Directory L1 Cache CMP")
     assert(is_valid(cache_entry));
     DPRINTF(RubySlicc, "%s\n", cache_entry.DataBlk);
     L1Icache.setMRU(cache_entry);
+    L1Icache.noteCheckpointLoadHit(address);
     sequencer.readCallback(address, cache_entry.DataBlk);
   }
 
