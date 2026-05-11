@@ -1054,6 +1054,10 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
             frontendPath = 'F';
             branchPC = queuedBranch;
 
+            // The queued predecode chain no longer matches the architectural
+            // path. Squash all speculative predictor history entries that
+            // were created for that chain before dropping the FTQ state.
+            branchPred->squash(queuedSeq - 1, tid);
             prefetchQueue[tid].clear();
             prefetchQueueBblSize[tid].clear();
             prefetchQueueSeqNum[tid].clear();
