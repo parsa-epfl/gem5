@@ -94,6 +94,13 @@ def discover_l1i_restore_files(options):
     if not getattr(options, "restore_l1i_state", False):
         return {}
 
+    if getattr(options, "num_cpus", 0) != 1:
+        fatal(
+            "L1I warm restore is currently validated only for single-core "
+            "runs; multicore restore requires coherent L2/directory state. "
+            "Got %d CPUs." % getattr(options, "num_cpus", 0)
+        )
+
     if not getattr(options, "restore", None):
         m5.util.warn(
             "--restore-l1i-state was set without --restore; "
