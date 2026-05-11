@@ -727,6 +727,11 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
                 // BTB lookup code commented for reference and use the decoded
                 // direct target instead.
                 //
+                // Deferred follow-up: !iPred also routes indirect controls
+                // through this path. Keep the validated FDIP/BTB behavior
+                // stable on this branch and handle the no-indirect-predictor
+                // fallback semantics in a dedicated debug/fix pass.
+                //
                 // ++stats.BTBLookups;
                 // if (BTB.valid(bbladdr, tid)) {
                 //     ++stats.BTBHits;

@@ -2444,6 +2444,10 @@ Fetch::preDecode(){
          * fallback recovery hands us a future BBL start, keep the handoff
          * state but wait until the matching line is actually buffered instead
          * of indexing past the end of the current line.
+         *
+         * Deferred follow-up: this latch clear is left as-is to preserve the
+         * currently validated FDIP/BTB behavior. If we revisit recovery
+         * retries, do it in a dedicated debug path with fresh validation.
          */
         if (prefAddr >= lineEnd) {
             DPRINTF(Fetch, "preDecode skip: lastPrefPC %#x beyond buffered line [%#x, %#x)\n",
