@@ -70,13 +70,6 @@ namespace o3
 
 class CPU;
 
-#define FTQ_MAX_SIZE 10
-/** Nayana: FDIP based Fetch Target Queue. */
-extern std::deque<TheISA::PCState> prefetchQueue[FTQ_MAX_SIZE];
-extern std::deque<InstSeqNum> prefetchQueueSeqNum[FTQ_MAX_SIZE];
-extern std::deque<TheISA::PCState> prefetchQueueBr[FTQ_MAX_SIZE];
-extern std::deque<branch_prediction::BTBFillSource>
-    prefetchQueueBtbSource[FTQ_MAX_SIZE];
 
 /**
  * Fetch class handles both single threaded and SMT fetch. Its
@@ -541,7 +534,18 @@ class Fetch
     /** Queue of fetched instructions. Per-thread to prevent HoL blocking. */
     std::deque<DynInstPtr> fetchQueue[MaxThreads];
 
-    /** Queue of to prefetch instructions. Per-thread to prevent HoL blocking. */
+    /** Nayana: FDIP-based Fetch Target Queue, private to this Fetch unit. */
+    std::deque<TheISA::PCState> prefetchQueue[MaxThreads];
+    std::deque<int> prefetchQueueBblSize[MaxThreads];
+    TheISA::PCState prevPC[MaxThreads];
+    std::deque<InstSeqNum> prefetchQueueSeqNum[MaxThreads];
+    std::deque<TheISA::PCState> prefetchQueueBr[MaxThreads];
+    std::deque<branch_prediction::BTBFillSource>
+        prefetchQueueBtbSource[MaxThreads];
+
+    /** Queue of instructions to prefetch.
+     * Per-thread to prevent HoL blocking.
+     */
     unsigned prefetchQueueSize;
 
 

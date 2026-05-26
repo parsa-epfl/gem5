@@ -108,16 +108,6 @@ std::map<Addr,bool> starve[10];
 std::map<Addr,char> missSt[10];
 std::map<Addr,bool> isPredictable[10];
 
-/** Nayana: FDIP based Fetch Target Queue. */
-std::deque<TheISA::PCState> prefetchQueue[FTQ_MAX_SIZE];
-std::deque<int> prefetchQueueBblSize[FTQ_MAX_SIZE];
-TheISA::PCState prevPC[FTQ_MAX_SIZE];
-std::deque<InstSeqNum> prefetchQueueSeqNum[FTQ_MAX_SIZE];
-std::deque<TheISA::PCState> prefetchQueueBr[FTQ_MAX_SIZE];
-std::deque<branch_prediction::BTBFillSource>
-    prefetchQueueBtbSource[FTQ_MAX_SIZE];
-
-
 Fetch::IcachePort::IcachePort(Fetch *_fetch, CPU *_cpu) :
         RequestPort(_cpu->name() + ".icache_port", _cpu), fetch(_fetch)
 {}
@@ -2308,11 +2298,23 @@ Fetch::predictNextBasicBlock(TheISA::PCState prefetchPc, TheISA::PCState &branch
         StaticInstPtr staticBranchInst = branchPred->getBranch(prefetchPc.instAddr(), tid);
         branchPC = branchPred->getBranchPC(prefetchPc.instAddr(), tid);
 
-        //if(!staticBranchInst->isDirectCtrl()){
-        //    return 0;
-        //}
-        
-        if(branchPC.instAddr() < prefetchPc.instAddr()){
+        /*
+         * Keep the decoupled FTQ on simple ground: direct-control chains are
+         * stable enough for ahead-of-fetch BBL walking, but indirects depend
+         * on dynamic predictor context such as RAS / indirect-target state.
+         * Let the normal frontend predict those when execution actually
+         * reaches them instead of speculating across them here.
+         */
+        if (staticBranchInst->isIndirectCtrl()) {
+            DPRINTF(Fetch,
+                    "Stopping FTQ prefetch at indirect control for BBL %#x "
+                    "(branch %#x)\n",
+                    prefetchPc.instAddr(), branchPC.instAddr());
+            stopPrefetch = true;
+            return TheISA::PCState(0);
+        }
+
+        if (branchPC.instAddr() < prefetchPc.instAddr()) {
             DPRINTF(Fetch, "Fix this case later\n");
             return 0;
         }
@@ -2829,6 +2831,12 @@ Fetch::addToFTQ()
         bool limitReached = false;
         nextPC = predictNextBasicBlock(thisPC, branchPC, tid, stopPrefetch, limitReached);
         if (limitReached) {
+            return;
+        }
+
+        if (stopPrefetch && nextPC.instAddr() <= 0x10) {
+            prefPC[tid] = 0;
+            lastPrefPC = 0;
             return;
         }
 
