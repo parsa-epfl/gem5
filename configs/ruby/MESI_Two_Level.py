@@ -42,6 +42,7 @@ class L2Cache(RubyCache): pass
 
 GEM5_UARCH_SUFFIX = "gem5_uarch"
 LLC_RESTORE_STAGED = "llc_restore_addrs.txt"
+L2_SHARED_RESTORE_STAGED = "l2_shared_restore_addrs.txt"
 L1D_RESTORE_TEMPLATE = "l1d_restore_addrs.core{core}.txt"
 L1I_RESTORE_TEMPLATE = "l1i_restore_addrs.core{core}.txt"
 
@@ -108,15 +109,39 @@ def discover_llc_restore_file(options):
     return str(target_path)
 
 
+def discover_l2_shared_restore_file(options):
+    if getattr(options, "num_cpus", 0) <= 1:
+        return None
+
+    if not (
+        getattr(options, "restore_l1d_state", False)
+        or getattr(options, "restore_l1i_state", False)
+    ):
+        return None
+
+    if not getattr(options, "restore", None):
+        return None
+
+    restore_dir = Path(options.restore).resolve()
+    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    target_path = gem5_uarch_dir / L2_SHARED_RESTORE_STAGED
+
+    if not gem5_uarch_dir.is_dir() or not target_path.is_file():
+        return None
+
+    return str(target_path)
+
+
 def discover_l1i_restore_files(options):
     if not getattr(options, "restore_l1i_state", False):
         return {}
 
     if getattr(options, "num_cpus", 0) != 1:
-        fatal(
+        m5.util.warn(
             "L1I warm restore is currently validated only for single-core "
-            "runs; multicore restore requires coherent L2/directory state. "
-            "Got %d CPUs." % getattr(options, "num_cpus", 0)
+            "runs; continuing experimentally in multicore mode without a "
+            "coherence-safe private restore contract. Got %d CPUs."
+            % getattr(options, "num_cpus", 0)
         )
 
     if not getattr(options, "restore", None):
@@ -156,10 +181,11 @@ def discover_l1d_restore_files(options):
         return {}
 
     if getattr(options, "num_cpus", 0) != 1:
-        fatal(
+        m5.util.warn(
             "L1D warm restore is currently validated only for single-core "
-            "runs; multicore restore requires coherent L2/directory state. "
-            "Got %d CPUs." % getattr(options, "num_cpus", 0)
+            "runs; continuing experimentally in multicore mode without a "
+            "coherence-safe private restore contract. Got %d CPUs."
+            % getattr(options, "num_cpus", 0)
         )
 
     if not getattr(options, "restore", None):
@@ -222,6 +248,8 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     l1i_restore_files = discover_l1i_restore_files(options)
 
     l1d_restore_files = discover_l1d_restore_files(options)
+
+    l2_shared_restore_file = discover_l2_shared_restore_file(options)
 
     for i in range(options.num_cpus):
         #
@@ -333,6 +361,15 @@ def create_system(options, full_system, system, dma_ports, bootmem,
                                           if i == 0 and restore_file
                                           else ""
                                       ),
+                                      restore_shared_private_state=(
+                                          i == 0
+                                          and bool(l2_shared_restore_file)
+                                      ),
+                                      shared_private_restore_file=(
+                                          l2_shared_restore_file
+                                          if i == 0 and l2_shared_restore_file
+                                          else ""
+                                      ),
                                       transitions_per_cycle = options.ports,
                                       ruby_system = ruby_system)
 
@@ -370,6 +407,10 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     for dir_cntrl in dir_cntrl_nodes:
         dir_cntrl.restore_llc_state = bool(restore_file)
         dir_cntrl.llc_restore_file = restore_file if restore_file else ""
+        dir_cntrl.restore_shared_private_state = bool(l2_shared_restore_file)
+        dir_cntrl.shared_private_restore_file = (
+            l2_shared_restore_file if l2_shared_restore_file else ""
+        )
         # Connect the directory controllers and the network
         dir_cntrl.requestToDir = MessageBuffer()
         dir_cntrl.requestToDir.in_port = ruby_system.network.out_port

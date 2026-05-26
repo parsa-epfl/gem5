@@ -30,6 +30,8 @@ machine(MachineType:Directory, "MESI Two Level directory protocol")
  : DirectoryMemory * directory;
    bool restore_llc_state := "False";
    std::string llc_restore_file := "";
+   bool restore_shared_private_state := "False";
+   std::string shared_private_restore_file := "";
    Cycles to_mem_ctrl_latency := 1;
    Cycles directory_latency := 6;
 
@@ -131,6 +133,9 @@ machine(MachineType:Directory, "MESI Two Level directory protocol")
   void startupWarmState() {
     if (restore_llc_state) {
       startupWarmStateFromFile(llc_restore_file);
+    }
+    if (restore_shared_private_state) {
+      startupWarmStateFromFile(shared_private_restore_file);
     }
   }
 
