@@ -137,8 +137,13 @@ bool
 ITTAGE::lookup(Addr br_addr, TheISA::PCState& br_target, ThreadID tid,
                void *& bp_history)
 {
-    br_target = predict(tid, br_addr, bp_history);
-    return br_target != 0;
+    Addr pred = predict(tid, br_addr, bp_history);
+    if (pred == 0) {
+        return false;
+    }
+
+    br_target = pred;
+    return true;
 }
 
 Addr

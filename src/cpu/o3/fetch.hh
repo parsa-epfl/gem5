@@ -308,7 +308,8 @@ class Fetch
      * @param pc The actual PC of the current instruction.
      * @return Any fault that occured.
      */
-    bool fetchCacheLine(Addr vaddr, ThreadID tid, Addr pc);
+    bool fetchCacheLine(Addr vaddr, ThreadID tid, Addr pc,
+                        InstSeqNum lineageSeq);
     void finishTranslation(const Fault &fault, const RequestPtr &mem_req);
 
 
@@ -525,7 +526,9 @@ class Fetch
     std::list<Addr> fetchBufferPC[MaxThreads];
     std::list<Addr> prefetchBufferPC[MaxThreads];
     std::list<Addr> prefetchBufferActualPC[MaxThreads];
+    std::list<InstSeqNum> prefetchBufferSeqNum[MaxThreads];
     std::list<RequestPtr> fetchBufferReqPtr[MaxThreads];
+    std::list<InstSeqNum> fetchBufferSeqNum[MaxThreads];
     bool add_front;
 
     /** The size of the fetch queue in micro-ops */

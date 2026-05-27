@@ -504,25 +504,46 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
     // Now lookup in the BTB or RAS.
     if (pred_taken) {
         if (inst->isReturn()) {
-            ++stats.RASUsed;
             predict_record.wasReturn = true;
-            // If it's a function return call, then look up the address
-            // in the RAS.
-            TheISA::PCState rasTop = RAS[tid].top();
-            target = inst->buildRetPC(pc, rasTop);
-            target.upc(0);
-            target.nupc(1);
 
-            // Record the top entry of the RAS, and its index.
-            predict_record.usedRAS = true;
-            predict_record.RASIndex = RAS[tid].topIdx();
-            predict_record.RASTarget = rasTop;
+            if (!RAS[tid].empty()) {
+                ++stats.RASUsed;
+                // If it's a function return call, then look up the address
+                // in the RAS.
+                TheISA::PCState rasTop = RAS[tid].top();
+                target = inst->buildRetPC(pc, rasTop);
+                target.upc(0);
+                target.nupc(1);
 
-            RAS[tid].pop();
+                // Record the top entry of the RAS, and its index.
+                predict_record.usedRAS = true;
+                predict_record.RASIndex = RAS[tid].topIdx();
+                predict_record.RASTarget = rasTop;
 
-            DPRINTF(Branch, "[tid:%i] [sn:%llu] Instruction %s is a return, "
-                    "RAS predicted target: %s, RAS index: %i\n",
-                    tid, seqNum, pc, target, predict_record.RASIndex);
+                RAS[tid].pop();
+
+                DPRINTF(Branch, "[tid:%i] [sn:%llu] Instruction %s is a "
+                        "return, RAS predicted target: %s, RAS index: %i\n",
+                        tid, seqNum, pc, target, predict_record.RASIndex);
+            } else {
+                ++stats.BTBLookups;
+                if (BTB.valid(pc.instAddr(), tid)) {
+                    ++stats.BTBHits;
+                    predict_record.btbSource =
+                        BTB.lookupSource(pc.instAddr(), tid);
+                    target = BTB.lookup(pc.instAddr(), tid);
+                    DPRINTF(Branch, "[tid:%i] [sn:%llu] Instruction %s is a "
+                            "return with empty RAS, BTB fallback target is "
+                            "%s\n", tid, seqNum, pc, target);
+                } else {
+                    pred_taken = false;
+                    predict_record.predTaken = pred_taken;
+                    inst->advancePC(target);
+                    DPRINTF(Branch, "[tid:%i] [sn:%llu] Instruction %s is a "
+                            "return with empty RAS and no BTB entry\n",
+                            tid, seqNum, pc);
+                }
+            }
         } else {
 
             if (inst->isCall()) {
@@ -684,24 +705,46 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
     // Now lookup in the BTB or RAS.
     if (pred_taken) {
         if (inst->isReturn()) {
-            ++stats.RASUsed;
             predict_record.wasReturn = true;
-            // If it's a function return call, then look up the address
-            // in the RAS.
-            TheISA::PCState rasTop = RAS[tid].top();
-            //target = TheISA::buildRetPC(pc, rasTop);
-            target = inst->buildRetPC(pc, rasTop);
 
-            // Record the top entry of the RAS, and its index.
-            predict_record.usedRAS = true;
-            predict_record.RASIndex = RAS[tid].topIdx();
-            predict_record.RASTarget = rasTop;
+            if (!RAS[tid].empty()) {
+                ++stats.RASUsed;
+                // If it's a function return call, then look up the address
+                // in the RAS.
+                TheISA::PCState rasTop = RAS[tid].top();
+                target = inst->buildRetPC(pc, rasTop);
 
-            RAS[tid].pop();
+                // Record the top entry of the RAS, and its index.
+                predict_record.usedRAS = true;
+                predict_record.RASIndex = RAS[tid].topIdx();
+                predict_record.RASTarget = rasTop;
 
-            DPRINTF(Branch, "[tid:%i] [sn:%llu] Instruction %s is a return, "
-                    "RAS predicted target: %s, RAS index: %i\n",
-                    tid, seqNum, pc, target, predict_record.RASIndex);
+                RAS[tid].pop();
+
+                DPRINTF(Branch, "[tid:%i] [sn:%llu] Instruction %s is a "
+                        "return, RAS predicted target: %s, RAS index: %i\n",
+                        tid, seqNum, pc, target, predict_record.RASIndex);
+            } else {
+                ++stats.BTBLookups;
+                ++stats.bblBTBLookups;
+                if (BTB.valid(bbladdr, tid)) {
+                    ++stats.BTBHits;
+                    ++stats.bblBTBHits;
+                    predict_record.btbSource = BTB.lookupSource(bbladdr, tid);
+                    target = BTB.lookup(bbladdr, tid);
+                    DPRINTF(Branch, "[tid:%i] [sn:%llu] Instruction %s is a "
+                            "return with empty RAS, FDIP BTB fallback target "
+                            "is %s\n", tid, seqNum, pc, target);
+                } else {
+                    ++stats.bblBTBMisses;
+                    pred_taken = false;
+                    predict_record.predTaken = pred_taken;
+                    inst->advancePC(target);
+                    DPRINTF(Branch, "[tid:%i] [sn:%llu] Instruction %s is a "
+                            "return with empty RAS and no FDIP BTB entry\n",
+                            tid, seqNum, pc);
+                }
+            }
         } else {
 
             if (inst->isCall()) {
