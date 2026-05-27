@@ -59,6 +59,12 @@ class L2Cache(RubyCache):
 
 GEM5_UARCH_SUFFIX = "gem5_uarch"
 LLC_RESTORE_STAGED = "llc_restore_addrs.txt"
+MOESI_PRIVATE_OWNER_RESTORE_STAGED = (
+    "moesi_single_private_data_writeable_restore.txt"
+)
+MOESI_PRIVATE_OWNER_L1D_RESTORE_TEMPLATE = (
+    "moesi_l1d_single_private_data_writeable.core{core}.txt"
+)
 
 
 def discover_gem5_uarch_dir(restore_dir: Path):
@@ -105,6 +111,76 @@ def discover_llc_restore_file(options):
 
     return str(target_path)
 
+def discover_moesi_private_owner_restore_file(options):
+    if not getattr(options, "restore_l1d_state", False):
+        return None
+
+    if not getattr(options, "restore", None):
+        m5.util.warn(
+            "--restore-l1d-state was set without --restore; "
+            "skipping MOESI private-owner warm-state import."
+        )
+        return None
+
+    restore_dir = Path(options.restore).resolve()
+    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    target_path = gem5_uarch_dir / MOESI_PRIVATE_OWNER_RESTORE_STAGED
+
+    if not gem5_uarch_dir.is_dir():
+        m5.util.warn(
+            "Skipping MOESI private-owner warm-state import; gem5_uarch "
+            f"directory is missing: {gem5_uarch_dir}"
+        )
+        return None
+
+    if not target_path.is_file():
+        m5.util.warn(
+            "Skipping MOESI private-owner warm-state import; restore file is "
+            f"missing: {target_path}"
+        )
+        return None
+
+    return str(target_path)
+
+
+def discover_moesi_l1d_restore_files(options):
+    if not getattr(options, "restore_l1d_state", False):
+        return {}
+
+    if not getattr(options, "restore", None):
+        m5.util.warn(
+            "--restore-l1d-state was set without --restore; "
+            "skipping MOESI private L1D warm-state import."
+        )
+        return {}
+
+    restore_dir = Path(options.restore).resolve()
+    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+
+    if not gem5_uarch_dir.is_dir():
+        m5.util.warn(
+            "Skipping MOESI private L1D warm-state import; gem5_uarch "
+            f"directory is missing: {gem5_uarch_dir}"
+        )
+        return {}
+
+    restore_files = {}
+    for core in range(getattr(options, "num_cpus", 0)):
+        target_path = gem5_uarch_dir / (
+            MOESI_PRIVATE_OWNER_L1D_RESTORE_TEMPLATE.format(core=core)
+        )
+        if target_path.is_file():
+            restore_files[core] = str(target_path)
+
+    if not restore_files:
+        m5.util.warn(
+            "No MOESI private-owner L1D restore files were found in "
+            f"{gem5_uarch_dir}. Running with cold private L1D state."
+        )
+
+    return restore_files
+
+
 def define_options(parser):
     return
 
@@ -112,14 +188,18 @@ def create_system(options, full_system, system, dma_ports, bootmem,
                   ruby_system, cpus):
 
     if buildEnv['PROTOCOL'] != 'MOESI_CMP_directory':
-        panic("This script requires the MOESI_CMP_directory protocol to be built.")
+        panic(
+            "This script requires the MOESI_CMP_directory "
+            "protocol to be built."
+        )
 
     cpu_sequencers = []
 
     #
     # The ruby network creation expects the list of nodes in the system to be
-    # consistent with the NetDest list.  Therefore the l1 controller nodes must be
-    # listed before the directory nodes and directory nodes before dma nodes, etc.
+    # consistent with the NetDest list. Therefore the L1 controller nodes
+    # must be listed before the directory nodes and directory nodes before
+    # DMA nodes, etc.
     #
     l1_cntrl_nodes = []
     l2_cntrl_nodes = []
@@ -130,6 +210,10 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     # controller constructors are called before the network constructor
     #
     block_size_bits = int(math.log(options.cacheline_size, 2))
+    l1d_restore_files = discover_moesi_l1d_restore_files(options)
+    private_owner_restore_file = discover_moesi_private_owner_restore_file(
+        options
+    )
 
     for i in range(options.num_cpus):
         #
@@ -151,7 +235,13 @@ def create_system(options, full_system, system, dma_ports, bootmem,
                                       send_evictions=send_evicts(options),
                                       transitions_per_cycle=options.ports,
                                       clk_domain=clk_domain,
-                                      ruby_system=ruby_system)
+                                      ruby_system=ruby_system,
+                                      restore_l1d_state=(
+                                          i in l1d_restore_files
+                                      ),
+                                      l1d_restore_file=(
+                                          l1d_restore_files.get(i, "")
+                                      ))
 
         cpu_seq = RubySequencer(version=i,
                                 dcache=l1d_cache, clk_domain=clk_domain,
@@ -187,6 +277,11 @@ def create_system(options, full_system, system, dma_ports, bootmem,
             "--restore-llc-state currently supports only --num-l2caches=1; "
             "got %d L2 caches." % options.num_l2caches
         )
+    if private_owner_restore_file and options.num_l2caches != 1:
+        m5.util.fatal(
+            "MOESI private-owner warm restore currently supports only "
+            "--num-l2caches=1; got %d L2 caches." % options.num_l2caches
+        )
 
     sysranges = [] + system.mem_ranges
     if bootmem: sysranges.append(bootmem.range)
@@ -219,6 +314,18 @@ def create_system(options, full_system, system, dma_ports, bootmem,
                                       llc_restore_file=(
                                           restore_file
                                           if i == 0 and restore_file
+                                          else ""
+                                      ),
+                                      restore_private_owner_state=(
+                                          i == 0
+                                          and bool(private_owner_restore_file)
+                                      ),
+                                      private_owner_restore_file=(
+                                          private_owner_restore_file
+                                          if (
+                                              i == 0
+                                              and private_owner_restore_file
+                                          )
                                           else ""
                                       ))
 
@@ -257,6 +364,12 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     for dir_cntrl in dir_cntrl_nodes:
         dir_cntrl.restore_llc_state = bool(restore_file)
         dir_cntrl.llc_restore_file = restore_file if restore_file else ""
+        dir_cntrl.restore_private_owner_state = bool(
+            private_owner_restore_file
+        )
+        dir_cntrl.private_owner_restore_file = (
+            private_owner_restore_file if private_owner_restore_file else ""
+        )
         # Connect the directory controllers and the network
         dir_cntrl.requestToDir = MessageBuffer()
         dir_cntrl.requestToDir.slave = ruby_system.network.master

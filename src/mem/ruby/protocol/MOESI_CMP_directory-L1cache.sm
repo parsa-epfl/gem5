@@ -46,6 +46,9 @@ machine(MachineType:L1Cache, "L1 cache protocol")
    Cycles response_latency := 1;
    Cycles use_timeout_latency := 50;
    bool send_evictions;
+   bool restore_l1d_state := "False";
+   std::string l1d_restore_file := "";
+   bool warm_restore_l1d_mode := "False";
 
    // Message Queues
    // From this node's L1 cache TO the network
@@ -153,6 +156,7 @@ machine(MachineType:L1Cache, "L1 cache protocol")
   void set_tbe(TBE b);
   void unset_tbe();
   MachineID mapAddressToMachine(Addr addr, MachineType mtype);
+  void startupWarmStateFromFile(std::string path);
 
   TBETable TBEs, template="<L1Cache_TBE>", constructor="m_number_of_TBEs";
   TimerTable useTimerTable;
@@ -244,6 +248,46 @@ machine(MachineType:L1Cache, "L1 cache protocol")
     if (is_valid(cache_entry)) {
       cache_entry.changePermission(L1Cache_State_to_permission(state));
     }
+  }
+
+  void preloadWarmL1DLine(Addr addr, State state) {
+    Entry cache_entry := getL1DCacheEntry(addr);
+    if (is_invalid(cache_entry)) {
+      cache_entry := static_cast(Entry, "pointer",
+          L1Dcache.allocate(addr, new Entry));
+    }
+
+    assert(is_valid(cache_entry));
+    readDataFromMemory(addr, cache_entry.DataBlk);
+    cache_entry.Dirty := false;
+    cache_entry.CacheState := state;
+    setAccessPermission(cache_entry, addr, state);
+    L1Dcache.setMRU(addr);
+    L1Dcache.markCheckpointLoad(addr);
+  }
+
+  void applyWarmLineAddr(Addr addr) {
+    if (warm_restore_l1d_mode) {
+      preloadWarmL1DLine(makeLineAddress(addr), State:M);
+    }
+  }
+
+  void applyWarmLineState(Addr addr, std::string warm_state) {
+    if (warm_restore_l1d_mode) {
+      preloadWarmL1DLine(makeLineAddress(addr), State:M);
+    }
+  }
+
+  void startupWarmL1DState() {
+    if (restore_l1d_state) {
+      warm_restore_l1d_mode := true;
+      startupWarmStateFromFile(l1d_restore_file);
+      warm_restore_l1d_mode := false;
+    }
+  }
+
+  void startupWarmState() {
+    startupWarmL1DState();
   }
 
   void functionalRead(Addr addr, Packet *pkt) {

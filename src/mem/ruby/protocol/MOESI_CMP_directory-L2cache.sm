@@ -42,6 +42,10 @@ machine(MachineType:L2Cache, "Token protocol")
 : CacheMemory * L2cache;
   bool restore_llc_state := "False";
   std::string llc_restore_file := "";
+  bool restore_private_owner_state := "False";
+  std::string private_owner_restore_file := "";
+  bool warm_restore_llc_mode := "False";
+  bool warm_restore_private_owner_mode := "False";
   Cycles response_latency := 1;
   Cycles request_latency := 1;
 
@@ -596,13 +600,39 @@ machine(MachineType:L2Cache, "Token protocol")
     L2cache.markCheckpointLoad(addr);
   }
 
+  void preloadWarmPrivateOwnerLine(Addr addr, NodeID owner_core) {
+    Entry cache_entry := getCacheEntry(addr);
+    assert(is_invalid(cache_entry));
+    recordNewLocalExclusiveInDir(
+        cache_entry, addr, createMachineID(MachineType:L1Cache, owner_core)
+    );
+    setState(TBEs[addr], cache_entry, addr, State:ILX);
+  }
+
   void applyWarmLineAddr(Addr addr) {
-    preloadWarmLine(makeLineAddress(addr));
+    if (warm_restore_private_owner_mode) {
+      Addr line_addr := makeLineAddress(addr);
+      NodeID owner_core := intToID(addressOffset(addr, line_addr));
+      preloadWarmPrivateOwnerLine(line_addr, owner_core);
+    } else if (warm_restore_llc_mode) {
+      preloadWarmLine(makeLineAddress(addr));
+    }
+  }
+
+  void applyWarmLineState(Addr addr, std::string warm_state) {
+    applyWarmLineAddr(addr);
   }
 
   void startupWarmState() {
     if (restore_llc_state) {
+      warm_restore_llc_mode := true;
       startupWarmStateFromFile(llc_restore_file);
+      warm_restore_llc_mode := false;
+    }
+    if (restore_private_owner_state) {
+      warm_restore_private_owner_mode := true;
+      startupWarmStateFromFile(private_owner_restore_file);
+      warm_restore_private_owner_mode := false;
     }
   }
 
