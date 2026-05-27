@@ -2358,6 +2358,11 @@ Fetch::predictNextBasicBlock(TheISA::PCState prefetchPc, TheISA::PCState &branch
     uint64_t &btbTotal = std::get<0>(btbConf);
     uint64_t &btbMisPred = std::get<1>(btbConf);
     btbTotal++;
+    /*
+     * This is the ordinary FDIP fallback path: if the BBL-BTB has no entry
+     * for the current prefetch PC, BBL growth stops here and the frontend
+     * continues via sequential rediscovery / predecode logic.
+     */
     if (!branchPred->getBblValid(prefetchPc.instAddr(), tid)) {
         ++fetchStats.fdipNoBblReturnZero;
         DPRINTF(Fetch,
@@ -2454,7 +2459,15 @@ Fetch::predictNextBasicBlock(TheISA::PCState prefetchPc, TheISA::PCState &branch
 
        Addr branch = branchPC.instAddr();
        //TheISA::PCState predictWPPC = branchPred->getTaken(prefetchPc.instAddr(), tid);
-       TheISA::PCState predictWPPC = branchPred->getTaken(branchPC.instAddr(), tid);
+       /*
+        * This lookup is live in the current BBL path. Probe runs do observe
+        * tiny targets here, but today that value is not the final authority
+        * for the returned next PC because predictPC is overwritten with
+        * nextPC below. Keep the hook so a future refactor cannot silently
+        * make this path architecturally relevant again.
+        */
+       TheISA::PCState predictWPPC =
+           branchPred->getTaken(branchPC.instAddr(), tid);
        if (predictWPPC.instAddr() < 0x10) {
            ++fetchStats.fdipTinyTakenTargetObserved;
            DPRINTF(Fetch,
