@@ -40,6 +40,8 @@
 
 machine(MachineType:L2Cache, "Token protocol")
 : CacheMemory * L2cache;
+  bool restore_llc_state := "False";
+  std::string llc_restore_file := "";
   Cycles response_latency := 1;
   Cycles request_latency := 1;
 
@@ -249,6 +251,7 @@ machine(MachineType:L2Cache, "Token protocol")
   void set_tbe(TBE b);
   void unset_tbe();
   MachineID mapAddressToMachine(Addr addr, MachineType mtype);
+  void startupWarmStateFromFile(std::string path);
   void wakeUpAllBuffers(Addr a);
 
   // Latency for responses that fetch data from cache
@@ -575,6 +578,34 @@ machine(MachineType:L2Cache, "Token protocol")
     }
   }
 
+  void preloadWarmLine(Addr addr) {
+    Entry cache_entry := getCacheEntry(addr);
+    if (is_invalid(cache_entry)) {
+      cache_entry := static_cast(Entry, "pointer",
+          L2cache.allocate(addr, new Entry));
+    }
+
+    assert(is_valid(cache_entry));
+    readDataFromMemory(addr, cache_entry.DataBlk);
+    cache_entry.Dirty := false;
+    cache_entry.Sharers.clear();
+    cache_entry.OwnerValid := false;
+    cache_entry.CacheState := State:S;
+    setAccessPermission(cache_entry, addr, State:S);
+    L2cache.setMRU(addr);
+    L2cache.markCheckpointLoad(addr);
+  }
+
+  void applyWarmLineAddr(Addr addr) {
+    preloadWarmLine(makeLineAddress(addr));
+  }
+
+  void startupWarmState() {
+    if (restore_llc_state) {
+      startupWarmStateFromFile(llc_restore_file);
+    }
+  }
+
   void functionalRead(Addr addr, Packet *pkt) {
     TBE tbe := TBEs[addr];
     Entry cache_entry := getCacheEntry(addr);
@@ -704,20 +735,23 @@ machine(MachineType:L2Cache, "Token protocol")
     if (L1requestNetwork_in.isReady(clockEdge())) {
       peek(L1requestNetwork_in, RequestMsg) {
         assert(in_msg.Destination.isElement(machineID));
+        Entry cache_entry := getCacheEntry(in_msg.addr);
+        if (is_valid(cache_entry)) {
+          L2cache.noteCheckpointLoadHit(in_msg.addr);
+        }
         if (in_msg.Type == CoherenceRequestType:GETX) {
           trigger(Event:L1_GETX, in_msg.addr,
-                  getCacheEntry(in_msg.addr), TBEs[in_msg.addr]);
+                  cache_entry, TBEs[in_msg.addr]);
         } else if (in_msg.Type == CoherenceRequestType:GETS) {
             trigger(Event:L1_GETS, in_msg.addr,
-                  getCacheEntry(in_msg.addr), TBEs[in_msg.addr]);
+                  cache_entry, TBEs[in_msg.addr]);
         } else if (in_msg.Type == CoherenceRequestType:PUTO) {
           trigger(Event:L1_PUTO, in_msg.addr,
-                  getCacheEntry(in_msg.addr), TBEs[in_msg.addr]);
+                  cache_entry, TBEs[in_msg.addr]);
         } else if (in_msg.Type == CoherenceRequestType:PUTX) {
           trigger(Event:L1_PUTX, in_msg.addr,
-                  getCacheEntry(in_msg.addr), TBEs[in_msg.addr]);
+                  cache_entry, TBEs[in_msg.addr]);
         } else if (in_msg.Type == CoherenceRequestType:PUTS) {
-          Entry cache_entry := getCacheEntry(in_msg.addr);
           if (isOnlySharer(cache_entry, in_msg.addr, in_msg.Requestor)) {
             trigger(Event:L1_PUTS_only, in_msg.addr,
                     cache_entry, TBEs[in_msg.addr]);

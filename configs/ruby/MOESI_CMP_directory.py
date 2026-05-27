@@ -38,6 +38,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import math
+from pathlib import Path
 import m5
 from m5.objects import *
 from m5.defines import buildEnv
@@ -54,6 +55,55 @@ class L1Cache(RubyCache):
 class L2Cache(RubyCache):
     dataAccessLatency = 20
     tagAccessLatency = 20
+
+
+GEM5_UARCH_SUFFIX = "gem5_uarch"
+LLC_RESTORE_STAGED = "llc_restore_addrs.txt"
+
+
+def discover_gem5_uarch_dir(restore_dir: Path):
+    workload_dir = restore_dir.parent
+    snapshot_name = restore_dir.name
+    nested = workload_dir / snapshot_name / GEM5_UARCH_SUFFIX
+    sibling = workload_dir / f"{snapshot_name}.{GEM5_UARCH_SUFFIX}"
+
+    if nested.is_dir():
+        return nested
+    if sibling.is_dir():
+        return sibling
+    return nested
+
+
+def discover_llc_restore_file(options):
+    if not getattr(options, "restore_llc_state", False):
+        return None
+
+    if not getattr(options, "restore", None):
+        m5.util.warn(
+            "--restore-llc-state was set without --restore; "
+            "skipping LLC warm-state import."
+        )
+        return None
+
+    restore_dir = Path(options.restore).resolve()
+    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    target_path = gem5_uarch_dir / LLC_RESTORE_STAGED
+
+    if not gem5_uarch_dir.is_dir():
+        m5.util.warn(
+            "Skipping LLC warm-state import; gem5_uarch directory is missing: "
+            f"{gem5_uarch_dir}"
+        )
+        return None
+
+    if not target_path.is_file():
+        m5.util.warn(
+            "Skipping LLC warm-state import; restore file is missing: "
+            f"{target_path}"
+        )
+        return None
+
+    return str(target_path)
 
 def define_options(parser):
     return
@@ -131,6 +181,13 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     l2_addr_ranges = []
     l2_bits = int(math.log(options.num_l2caches, 2))
     numa_bit = block_size_bits + l2_bits - 1
+    restore_file = discover_llc_restore_file(options)
+    if restore_file and options.num_l2caches != 1:
+        m5.util.fatal(
+            "--restore-llc-state currently supports only --num-l2caches=1; "
+            "got %d L2 caches." % options.num_l2caches
+        )
+
     sysranges = [] + system.mem_ranges
     if bootmem: sysranges.append(bootmem.range)
     for i in range(options.num_l2caches):
@@ -155,7 +212,15 @@ def create_system(options, full_system, system, dma_ports, bootmem,
                                       L2cache = l2_cache,
                                       transitions_per_cycle = options.ports,
                                       ruby_system = ruby_system,
-                                      addr_ranges = l2_addr_ranges[i])
+                                      addr_ranges = l2_addr_ranges[i],
+                                      restore_llc_state=(
+                                          i == 0 and bool(restore_file)
+                                      ),
+                                      llc_restore_file=(
+                                          restore_file
+                                          if i == 0 and restore_file
+                                          else ""
+                                      ))
 
         exec("ruby_system.l2_cntrl%d = l2_cntrl" % i)
         l2_cntrl_nodes.append(l2_cntrl)
@@ -190,6 +255,8 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     if rom_dir_cntrl_node is not None:
         dir_cntrl_nodes.append(rom_dir_cntrl_node)
     for dir_cntrl in dir_cntrl_nodes:
+        dir_cntrl.restore_llc_state = bool(restore_file)
+        dir_cntrl.llc_restore_file = restore_file if restore_file else ""
         # Connect the directory controllers and the network
         dir_cntrl.requestToDir = MessageBuffer()
         dir_cntrl.requestToDir.slave = ruby_system.network.master
