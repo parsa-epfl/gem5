@@ -1,7 +1,7 @@
 # Copyright (c) 2026 EPFL
 # All rights reserved.
 
-"""QPoints ARM full-system configuration for O3 + Ruby MESI_Two_Level."""
+"""QPoints ARM full-system configuration for O3 + Ruby timing protocols."""
 
 import argparse
 import os
@@ -20,6 +20,9 @@ from ruby import Ruby
 
 import devices
 
+# Despite the filename, this launcher is shared by the MESI bring-up path and
+# the early MOESI cold-bring-up path. Protocol-specific restore plumbing still
+# lives in the Ruby protocol code itself.
 
 default_kernel = "vmlinux.arm64"
 default_disk = "linaro-minimal-aarch64.img"
