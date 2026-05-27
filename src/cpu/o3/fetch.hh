@@ -685,6 +685,12 @@ class Fetch
         statistics::Formula rate;
         statistics::Scalar fetchTotalStarvations;
         statistics::Scalar fetchNonResteerStarvations;
+        statistics::Scalar fdipNoBblReturnZero;
+        statistics::Scalar fdipBackwardBranchPcReturnZero;
+        statistics::Scalar fdipFtqInstLimitReturnZero;
+        statistics::Scalar fdipTinyNextPcStopPrefetch;
+        statistics::Scalar fdipTinyTakenTargetObserved;
+        statistics::Scalar fdipLegacyTinyPredGuard;
     } fetchStats;
 };
 

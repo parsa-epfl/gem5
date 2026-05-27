@@ -300,7 +300,25 @@ Fetch::FetchStatGroup::FetchStatGroup(CPU *cpu, Fetch *fetch)
     ADD_STAT(fetchTotalStarvations, statistics::units::Count::get(),
              "Number of times fetch starved on a line"),
     ADD_STAT(fetchNonResteerStarvations, statistics::units::Count::get(),
-             "Number of times fetch starved on a line when not resteering")
+             "Number of times fetch starved on a line when not resteering"),
+    ADD_STAT(fdipNoBblReturnZero, statistics::units::Count::get(),
+             "Number of times FDIP BBL growth returned zero because no "
+             "BBL entry was valid"),
+    ADD_STAT(fdipBackwardBranchPcReturnZero, statistics::units::Count::get(),
+             "Number of times FDIP BBL growth returned zero because "
+             "branchPC regressed behind the prefetch PC"),
+    ADD_STAT(fdipFtqInstLimitReturnZero, statistics::units::Count::get(),
+             "Number of times FDIP BBL growth returned zero because the "
+             "FTQ instruction budget was exceeded"),
+    ADD_STAT(fdipTinyNextPcStopPrefetch, statistics::units::Count::get(),
+             "Number of times FDIP BBL growth hit the tiny-nextPC "
+             "stop-prefetch guard"),
+    ADD_STAT(fdipTinyTakenTargetObserved, statistics::units::Count::get(),
+             "Number of times FDIP observed a tiny target from "
+             "getTaken() in the BBL path"),
+    ADD_STAT(fdipLegacyTinyPredGuard, statistics::units::Count::get(),
+             "Number of times the legacy tiny predicted-PC guard fired "
+             "in fetch")
 {
         icacheStallCycles
             .prereq(icacheStallCycles);
@@ -353,6 +371,18 @@ Fetch::FetchStatGroup::FetchStatGroup(CPU *cpu, Fetch *fetch)
             .prereq(fetchTotalStarvations);
        fetchNonResteerStarvations 
             .prereq(fetchNonResteerStarvations);
+       fdipNoBblReturnZero
+            .prereq(fdipNoBblReturnZero);
+       fdipBackwardBranchPcReturnZero
+            .prereq(fdipBackwardBranchPcReturnZero);
+       fdipFtqInstLimitReturnZero
+            .prereq(fdipFtqInstLimitReturnZero);
+       fdipTinyNextPcStopPrefetch
+            .prereq(fdipTinyNextPcStopPrefetch);
+       fdipTinyTakenTargetObserved
+            .prereq(fdipTinyTakenTargetObserved);
+       fdipLegacyTinyPredGuard
+            .prereq(fdipLegacyTinyPredGuard);
 }
 void
 Fetch::setTimeBuffer(TimeBuffer<TimeStruct> *time_buffer)
@@ -1156,6 +1186,11 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
     // revisit once the remaining frontend/predictor corner cases are
     // fully understood.
     if (tempPC.instAddr() < 0x10) {
+        ++fetchStats.fdipLegacyTinyPredGuard;
+        DPRINTF(Fetch,
+                "Legacy tiny predicted-PC guard fired at inst %#x: "
+                "tempPC %s\n",
+                inst->pcState().instAddr(), tempPC);
         inst->staticInst->advancePC(nextPC);
         predict_taken = false;
     } else {
@@ -2324,6 +2359,10 @@ Fetch::predictNextBasicBlock(TheISA::PCState prefetchPc, TheISA::PCState &branch
     uint64_t &btbMisPred = std::get<1>(btbConf);
     btbTotal++;
     if (!branchPred->getBblValid(prefetchPc.instAddr(), tid)) {
+        ++fetchStats.fdipNoBblReturnZero;
+        DPRINTF(Fetch,
+                "FDIP BBL growth returning zero at %#x: no valid BBL entry\n",
+                prefetchPc.instAddr());
         btbMisPred++;
         return 0;
     }
@@ -2339,7 +2378,11 @@ Fetch::predictNextBasicBlock(TheISA::PCState prefetchPc, TheISA::PCState &branch
         branchPC = branchPred->getBranchPC(prefetchPc.instAddr(), tid);
 
         if (branchPC.instAddr() < prefetchPc.instAddr()) {
-            DPRINTF(Fetch, "Fix this case later\n");
+            ++fetchStats.fdipBackwardBranchPcReturnZero;
+            DPRINTF(Fetch,
+                    "FDIP BBL growth returning zero at %#x: branchPC "
+                    "%s regressed\n",
+                    prefetchPc.instAddr(), branchPC);
             return 0;
         }
 
@@ -2356,7 +2399,11 @@ Fetch::predictNextBasicBlock(TheISA::PCState prefetchPc, TheISA::PCState &branch
 
         DPRINTF(Fetch, "insts pre-fetched %llu\n",num_insts);
         if(num_insts > ftqInst){
-            DPRINTF(Fetch, "ftqInst limit reached\n");
+            ++fetchStats.fdipFtqInstLimitReturnZero;
+            DPRINTF(Fetch,
+                    "FDIP BBL growth returning zero at %#x: ftqInst "
+                    "limit reached (%llu > %u)\n",
+                    prefetchPc.instAddr(), num_insts, ftqInst);
             instLimitReached = true;
             return 0;
         }
@@ -2381,6 +2428,11 @@ Fetch::predictNextBasicBlock(TheISA::PCState prefetchPc, TheISA::PCState &branch
                                       prefetchPc.instAddr(), nextPC, tid);
 
         if(nextPC.instAddr() < 0x1000){
+            ++fetchStats.fdipTinyNextPcStopPrefetch;
+            DPRINTF(Fetch,
+                    "FDIP tiny-nextPC stop: prefetchPC %#x branchPC "
+                    "%s nextPC %s\n",
+                    prefetchPc.instAddr(), branchPC, nextPC);
             nextPC = branchPC;
             nextPC.npc(nextPC.pc() + 4);
             staticBranchInst->advancePC(nextPC);
@@ -2403,6 +2455,12 @@ Fetch::predictNextBasicBlock(TheISA::PCState prefetchPc, TheISA::PCState &branch
        Addr branch = branchPC.instAddr();
        //TheISA::PCState predictWPPC = branchPred->getTaken(prefetchPc.instAddr(), tid);
        TheISA::PCState predictWPPC = branchPred->getTaken(branchPC.instAddr(), tid);
+       if (predictWPPC.instAddr() < 0x10) {
+           ++fetchStats.fdipTinyTakenTargetObserved;
+           DPRINTF(Fetch,
+                   "FDIP observed tiny getTaken target at branchPC %#x: %s\n",
+                   branchPC.instAddr(), predictWPPC);
+       }
        if (predict_taken) {
            predictPC = predictWPPC;
            staticBranchInst->advancePC(predictWPPC);
