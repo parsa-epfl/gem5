@@ -46,6 +46,8 @@ machine(MachineType:L2Cache, "Token protocol")
   std::string private_owner_restore_file := "";
   bool restore_private_clean_state := "False";
   std::string private_clean_restore_file := "";
+  bool restore_private_multi_clean_state := "False";
+  std::string private_multi_clean_restore_file := "";
   bool warm_restore_llc_mode := "False";
   bool warm_restore_private_owner_mode := "False";
   bool warm_restore_private_clean_mode := "False";
@@ -648,6 +650,11 @@ machine(MachineType:L2Cache, "Token protocol")
     if (restore_private_clean_state) {
       warm_restore_private_clean_mode := true;
       startupWarmStateFromFile(private_clean_restore_file);
+      warm_restore_private_clean_mode := false;
+    }
+    if (restore_private_multi_clean_state) {
+      warm_restore_private_clean_mode := true;
+      startupWarmStateFromFile(private_multi_clean_restore_file);
       warm_restore_private_clean_mode := false;
     }
     if (restore_private_owner_state) {

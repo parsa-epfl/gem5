@@ -50,6 +50,8 @@ machine(MachineType:L1Cache, "L1 cache protocol")
    std::string l1d_restore_file := "";
    bool restore_l1d_clean_state := "False";
    std::string l1d_clean_restore_file := "";
+   bool restore_l1d_multi_clean_state := "False";
+   std::string l1d_multi_clean_restore_file := "";
    bool warm_restore_l1d_mode := "False";
 
    // Message Queues
@@ -295,6 +297,11 @@ machine(MachineType:L1Cache, "L1 cache protocol")
     if (restore_l1d_clean_state) {
       warm_restore_l1d_mode := true;
       startupWarmStateFromFile(l1d_clean_restore_file);
+      warm_restore_l1d_mode := false;
+    }
+    if (restore_l1d_multi_clean_state) {
+      warm_restore_l1d_mode := true;
+      startupWarmStateFromFile(l1d_multi_clean_restore_file);
       warm_restore_l1d_mode := false;
     }
   }

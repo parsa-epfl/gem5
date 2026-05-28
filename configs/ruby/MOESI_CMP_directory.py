@@ -71,6 +71,12 @@ MOESI_PRIVATE_CLEAN_RESTORE_STAGED = (
 MOESI_PRIVATE_CLEAN_L1D_RESTORE_TEMPLATE = (
     "moesi_l1d_single_private_data_clean.core{core}.txt"
 )
+MOESI_MULTI_PRIVATE_CLEAN_RESTORE_STAGED = (
+    "moesi_multi_private_data_clean_restore.txt"
+)
+MOESI_MULTI_PRIVATE_CLEAN_L1D_RESTORE_TEMPLATE = (
+    "moesi_l1d_multi_private_data_clean.core{core}.txt"
+)
 
 
 def discover_gem5_uarch_dir(restore_dir: Path):
@@ -181,6 +187,39 @@ def discover_moesi_private_clean_restore_file(options):
     return str(target_path)
 
 
+def discover_moesi_multi_private_clean_restore_file(options):
+    if not getattr(options, "restore_l1d_state", False):
+        return None
+
+    if not getattr(options, "restore", None):
+        m5.util.warn(
+            "--restore-l1d-state was set without --restore; "
+            "skipping MOESI multi-private clean warm-state import."
+        )
+        return None
+
+    restore_dir = Path(options.restore).resolve()
+    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    target_path = gem5_uarch_dir / MOESI_MULTI_PRIVATE_CLEAN_RESTORE_STAGED
+
+    if not gem5_uarch_dir.is_dir():
+        m5.util.warn(
+            "Skipping MOESI multi-private clean warm-state import; gem5_uarch "
+            f"directory is missing: {gem5_uarch_dir}"
+        )
+        return None
+
+    if not target_path.is_file():
+        m5.util.warn(
+            "Skipping MOESI multi-private clean warm-state import; "
+            "restore file is "
+            f"missing: {target_path}"
+        )
+        return None
+
+    return str(target_path)
+
+
 def discover_moesi_l1d_restore_files(options):
     if not getattr(options, "restore_l1d_state", False):
         return {}
@@ -214,6 +253,45 @@ def discover_moesi_l1d_restore_files(options):
         m5.util.warn(
             "No MOESI private-owner L1D restore files were found in "
             f"{gem5_uarch_dir}. Running with cold private L1D state."
+        )
+
+    return restore_files
+
+
+def discover_moesi_l1d_multi_clean_restore_files(options):
+    if not getattr(options, "restore_l1d_state", False):
+        return {}
+
+    if not getattr(options, "restore", None):
+        m5.util.warn(
+            "--restore-l1d-state was set without --restore; "
+            "skipping MOESI multi-private clean L1D warm-state import."
+        )
+        return {}
+
+    restore_dir = Path(options.restore).resolve()
+    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+
+    if not gem5_uarch_dir.is_dir():
+        m5.util.warn(
+            "Skipping MOESI multi-private clean L1D warm-state import; "
+            "gem5_uarch "
+            f"directory is missing: {gem5_uarch_dir}"
+        )
+        return {}
+
+    restore_files = {}
+    for core in range(getattr(options, "num_cpus", 0)):
+        target_path = gem5_uarch_dir / (
+            MOESI_MULTI_PRIVATE_CLEAN_L1D_RESTORE_TEMPLATE.format(core=core)
+        )
+        if target_path.is_file():
+            restore_files[core] = str(target_path)
+
+    if not restore_files:
+        m5.util.warn(
+            "No MOESI multi-private clean L1D restore files were found in "
+            f"{gem5_uarch_dir}. Running without the multi-private clean slice."
         )
 
     return restore_files
@@ -288,12 +366,19 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     block_size_bits = int(math.log(options.cacheline_size, 2))
     l1d_restore_files = discover_moesi_l1d_restore_files(options)
     l1d_clean_restore_files = discover_moesi_l1d_clean_restore_files(options)
+    l1d_multi_clean_restore_files = (
+        discover_moesi_l1d_multi_clean_restore_files(options)
+    )
     private_owner_restore_file = discover_moesi_private_owner_restore_file(
         options
     )
     private_clean_restore_file = discover_moesi_private_clean_restore_file(
         options
     )
+    private_multi_clean_restore_file = (
+        discover_moesi_multi_private_clean_restore_file(options)
+    )
+    multi_clean_enabled = bool(private_multi_clean_restore_file)
 
     for i in range(options.num_cpus):
         #
@@ -327,6 +412,14 @@ def create_system(options, full_system, system, dma_ports, bootmem,
                                       ),
                                       l1d_clean_restore_file=(
                                           l1d_clean_restore_files.get(i, "")
+                                      ),
+                                      restore_l1d_multi_clean_state=(
+                                          i in l1d_multi_clean_restore_files
+                                      ),
+                                      l1d_multi_clean_restore_file=(
+                                          l1d_multi_clean_restore_files.get(
+                                              i, ""
+                                          )
                                       ))
 
         cpu_seq = RubySequencer(version=i,
@@ -376,6 +469,17 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     if private_clean_restore_file and options.num_l2caches != 1:
         m5.util.fatal(
             "MOESI private-clean warm restore currently supports only "
+            "--num-l2caches=1; got %d L2 caches." % options.num_l2caches
+        )
+    if private_multi_clean_restore_file and not restore_file:
+        m5.util.fatal(
+            "MOESI multi-private clean warm restore requires "
+            "--restore-llc-state so LLC-backed lines exist before local "
+            "sharer metadata is added."
+        )
+    if private_multi_clean_restore_file and options.num_l2caches != 1:
+        m5.util.fatal(
+            "MOESI multi-private clean warm restore currently supports only "
             "--num-l2caches=1; got %d L2 caches." % options.num_l2caches
         )
 
@@ -434,6 +538,14 @@ def create_system(options, full_system, system, dma_ports, bootmem,
                                               i == 0
                                               and private_clean_restore_file
                                           )
+                                          else ""
+                                      ),
+                                      restore_private_multi_clean_state=(
+                                          i == 0 and multi_clean_enabled
+                                      ),
+                                      private_multi_clean_restore_file=(
+                                          private_multi_clean_restore_file
+                                          if (i == 0 and multi_clean_enabled)
                                           else ""
                                       ))
 
