@@ -48,9 +48,12 @@ machine(MachineType:L2Cache, "Token protocol")
   std::string private_clean_restore_file := "";
   bool restore_private_multi_clean_state := "False";
   std::string private_multi_clean_restore_file := "";
+  bool restore_private_instruction_state := "False";
+  std::string private_instruction_restore_file := "";
   bool warm_restore_llc_mode := "False";
   bool warm_restore_private_owner_mode := "False";
   bool warm_restore_private_clean_mode := "False";
+  bool warm_restore_private_instruction_mode := "False";
   Cycles response_latency := 1;
   Cycles request_latency := 1;
 
@@ -632,6 +635,10 @@ machine(MachineType:L2Cache, "Token protocol")
       Addr line_addr := makeLineAddress(addr);
       NodeID sharer_core := intToID(addressOffset(addr, line_addr));
       preloadWarmPrivateCleanLine(line_addr, sharer_core);
+    } else if (warm_restore_private_instruction_mode) {
+      Addr line_addr := makeLineAddress(addr);
+      NodeID sharer_core := intToID(addressOffset(addr, line_addr));
+      preloadWarmPrivateCleanLine(line_addr, sharer_core);
     } else if (warm_restore_llc_mode) {
       preloadWarmLine(makeLineAddress(addr));
     }
@@ -656,6 +663,11 @@ machine(MachineType:L2Cache, "Token protocol")
       warm_restore_private_clean_mode := true;
       startupWarmStateFromFile(private_multi_clean_restore_file);
       warm_restore_private_clean_mode := false;
+    }
+    if (restore_private_instruction_state) {
+      warm_restore_private_instruction_mode := true;
+      startupWarmStateFromFile(private_instruction_restore_file);
+      warm_restore_private_instruction_mode := false;
     }
     if (restore_private_owner_state) {
       warm_restore_private_owner_mode := true;
