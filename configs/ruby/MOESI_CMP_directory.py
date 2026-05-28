@@ -716,7 +716,6 @@ def create_system(options, full_system, system, dma_ports, bootmem,
                                           private_multi_clean_restore_file
                                           if (i == 0 and multi_clean_enabled)
                                           else ""
-                                      ),
                                       ))
 
         l2_cntrl.restore_private_instruction_state = (
