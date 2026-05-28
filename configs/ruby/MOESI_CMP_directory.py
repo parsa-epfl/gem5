@@ -74,6 +74,9 @@ MOESI_PRIVATE_CLEAN_L1D_RESTORE_TEMPLATE = (
 MOESI_MULTI_PRIVATE_CLEAN_RESTORE_STAGED = (
     "moesi_multi_private_data_clean_restore.txt"
 )
+MOESI_MULTI_PRIVATE_CLEAN_NONLLC_RESTORE_STAGED = (
+    "moesi_multi_private_data_clean_nonllc_restore.txt"
+)
 MOESI_MULTI_PRIVATE_CLEAN_L1D_RESTORE_TEMPLATE = (
     "moesi_l1d_multi_private_data_clean.core{core}.txt"
 )
@@ -223,6 +226,40 @@ def discover_moesi_multi_private_clean_restore_file(options):
             "Skipping MOESI multi-private clean warm-state import; "
             "restore file is "
             f"missing: {target_path}"
+        )
+        return None
+
+    return str(target_path)
+
+
+def discover_moesi_multi_private_clean_nonllc_restore_file(options):
+    if not getattr(options, "restore_l1d_state", False):
+        return None
+
+    if not getattr(options, "restore", None):
+        m5.util.warn(
+            "--restore-l1d-state was set without --restore; "
+            "skipping MOESI non-LLC multi-private clean warm-state import."
+        )
+        return None
+
+    restore_dir = Path(options.restore).resolve()
+    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    target_path = (
+        gem5_uarch_dir / MOESI_MULTI_PRIVATE_CLEAN_NONLLC_RESTORE_STAGED
+    )
+
+    if not gem5_uarch_dir.is_dir():
+        m5.util.warn(
+            "Skipping MOESI non-LLC multi-private clean warm-state import; "
+            f"gem5_uarch directory is missing: {gem5_uarch_dir}"
+        )
+        return None
+
+    if not target_path.is_file():
+        m5.util.warn(
+            "Skipping MOESI non-LLC multi-private clean warm-state import; "
+            f"restore file is missing: {target_path}"
         )
         return None
 
@@ -498,6 +535,9 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     private_multi_clean_restore_file = (
         discover_moesi_multi_private_clean_restore_file(options)
     )
+    private_multi_clean_nonllc_restore_file = (
+        discover_moesi_multi_private_clean_nonllc_restore_file(options)
+    )
     private_instruction_restore_file = (
         discover_moesi_private_instruction_only_restore_file(options)
     )
@@ -505,6 +545,9 @@ def create_system(options, full_system, system, dma_ports, bootmem,
         discover_moesi_private_instruction_only_nonllc_restore_file(options)
     )
     multi_clean_enabled = bool(private_multi_clean_restore_file)
+    multi_clean_nonllc_enabled = bool(
+        private_multi_clean_nonllc_restore_file
+    )
     instruction_restore_enabled = bool(private_instruction_restore_file)
     instruction_nonllc_restore_enabled = bool(
         private_instruction_nonllc_restore_file
@@ -618,7 +661,9 @@ def create_system(options, full_system, system, dma_ports, bootmem,
             "--restore-llc-state so LLC-backed lines exist before local "
             "sharer metadata is added."
         )
-    if private_multi_clean_restore_file and options.num_l2caches != 1:
+    if (
+        multi_clean_enabled or multi_clean_nonllc_enabled
+    ) and options.num_l2caches != 1:
         m5.util.fatal(
             "MOESI multi-private clean warm restore currently supports only "
             "--num-l2caches=1; got %d L2 caches." % options.num_l2caches
@@ -669,6 +714,14 @@ def create_system(options, full_system, system, dma_ports, bootmem,
         private_instruction_nonllc_restore_file_arg = (
             private_instruction_nonllc_restore_file
             if restore_instruction_nonllc_state_arg
+            else ""
+        )
+        restore_multi_clean_nonllc_state_arg = (
+            i == 0 and multi_clean_nonllc_enabled
+        )
+        private_multi_clean_nonllc_restore_file_arg = (
+            private_multi_clean_nonllc_restore_file
+            if restore_multi_clean_nonllc_state_arg
             else ""
         )
 
@@ -729,6 +782,12 @@ def create_system(options, full_system, system, dma_ports, bootmem,
         )
         l2_cntrl.private_instruction_nonllc_restore_file = (
             private_instruction_nonllc_restore_file_arg
+        )
+        l2_cntrl.restore_private_multi_clean_nonllc_state = (
+            restore_multi_clean_nonllc_state_arg
+        )
+        l2_cntrl.private_multi_clean_nonllc_restore_file = (
+            private_multi_clean_nonllc_restore_file_arg
         )
 
         exec("ruby_system.l2_cntrl%d = l2_cntrl" % i)
