@@ -120,13 +120,29 @@ def discover_l2_shared_restore_file(options):
         return None
 
     if not getattr(options, "restore", None):
+        m5.util.warn(
+            "multicore L2 shared-private restore was requested without "
+            "--restore; skipping shared-private warm-state import."
+        )
         return None
 
     restore_dir = Path(options.restore).resolve()
     gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
     target_path = gem5_uarch_dir / L2_SHARED_RESTORE_STAGED
 
-    if not gem5_uarch_dir.is_dir() or not target_path.is_file():
+    if not gem5_uarch_dir.is_dir():
+        m5.util.warn(
+            f"gem5 uarch restore directory not found: {gem5_uarch_dir}. "
+            "Running without shared-private L2 warm state."
+        )
+        return None
+
+    if not target_path.is_file():
+        m5.util.warn(
+            f"L2 shared-private restore file not found in gem5 uarch "
+            f"directory: {target_path}. Running without shared-private "
+            "L2 warm state."
+        )
         return None
 
     return str(target_path)
@@ -330,6 +346,12 @@ def create_system(options, full_system, system, dma_ports, bootmem,
         fatal(
             "--restore-llc-state currently supports only --num-l2caches=1; "
             "got %d L2 caches." % options.num_l2caches
+        )
+
+    if l2_shared_restore_file and options.num_l2caches != 1:
+        fatal(
+            "multicore shared-private restore currently supports only "
+            "--num-l2caches=1; got %d L2 caches." % options.num_l2caches
         )
 
     for i in range(options.num_l2caches):
