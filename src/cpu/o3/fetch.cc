@@ -1106,6 +1106,14 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
                                       bblAddr[tid], tempPC, tid);
             brseq[tid] = seq[tid];
             seq[tid]++;
+            // Deferred follow-up: if the legacy tiny-target guard below
+            // later rejects tempPC, this early prefPC seed can leave a
+            // tiny sentinel behind. addToFTQ() already bails out on
+            // prefPC < 0x10, so the observed risk here is suppressed
+            // FDIP growth rather than issuing invalid tiny-address
+            // prefetches. Revisit only with a clear policy on whether
+            // the right recovery is to clear prefPC or rewrite it to
+            // the architectural fallthrough target.
             prefPC[tid] = tempPC;
             inst->isBTBMiss = true;
             inst->btbFillSource = branch_prediction::BTBFillSource::None;
