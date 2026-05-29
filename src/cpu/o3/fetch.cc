@@ -1760,6 +1760,7 @@ Fetch::doSquash(const TheISA::PCState &newPC, const DynInstPtr squashInst,
         prefetchQueueBtbSource[tid].clear();
         prefetchBufferPC[tid].clear();
         prefetchBufferActualPC[tid].clear();
+        prefetchBufferSeqNum[tid].clear();
         DPRINTF(Fetch, "[tid:%i] Squashing, prefetch Queue to size: %d.\n",
             tid, prefetchQueue[tid].size());
     //}
