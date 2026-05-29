@@ -47,6 +47,7 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
    std::string llc_restore_file := "";
    bool restore_shared_private_state := "False";
    std::string shared_private_restore_file := "";
+   bool warm_restore_shared_private_mode := "False";
 
   // Message Queues
   // From local bank of L2 cache TO the network
@@ -299,7 +300,13 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
   }
 
   void applyWarmLineAddr(Addr addr) {
-    preloadWarmLine(makeLineAddress(addr));
+    Addr line_addr := makeLineAddress(addr);
+    if (warm_restore_shared_private_mode) {
+      NodeID sharer_core := intToID(addressOffset(addr, line_addr));
+      preloadWarmSharedPrivateLine(line_addr, sharer_core);
+    } else {
+      preloadWarmLine(line_addr);
+    }
   }
 
   void applyWarmLineState(Addr addr, std::string warm_state) {
@@ -332,7 +339,9 @@ machine(MachineType:L2Cache, "MESI Directory L2 Cache CMP")
       startupWarmStateFromFile(llc_restore_file);
     }
     if (restore_shared_private_state) {
+      warm_restore_shared_private_mode := true;
       startupWarmStateFromFile(shared_private_restore_file);
+      warm_restore_shared_private_mode := false;
     }
   }
 
