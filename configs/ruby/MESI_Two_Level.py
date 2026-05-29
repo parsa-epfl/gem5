@@ -42,6 +42,7 @@ class L2Cache(RubyCache): pass
 
 GEM5_UARCH_SUFFIX = "gem5_uarch"
 LLC_RESTORE_STAGED = "llc_restore_addrs.txt"
+L2_SHARED_RESTORE_STAGED = "l2_shared_restore_addrs.txt"
 L1D_RESTORE_TEMPLATE = "l1d_restore_addrs.core{core}.txt"
 L1I_RESTORE_TEMPLATE = "l1i_restore_addrs.core{core}.txt"
 
@@ -108,15 +109,53 @@ def discover_llc_restore_file(options):
     return str(target_path)
 
 
+def discover_l2_shared_restore_file(options):
+    if getattr(options, "num_cpus", 0) <= 1:
+        return None
+
+    if not (
+        getattr(options, "restore_l1d_state", False)
+        or getattr(options, "restore_l1i_state", False)
+    ):
+        return None
+
+    if not getattr(options, "restore", None):
+        m5.util.fatal(
+            "multicore L1 warm restore requires --restore so the matching "
+            "shared-private L2/directory state can be seeded."
+        )
+
+    restore_dir = Path(options.restore).resolve()
+    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    target_path = gem5_uarch_dir / L2_SHARED_RESTORE_STAGED
+
+    if not gem5_uarch_dir.is_dir():
+        m5.util.fatal(
+            f"gem5 uarch restore directory not found: {gem5_uarch_dir}. "
+            "Multicore L1 warm restore requires the matching shared-private "
+            "L2/directory artifacts."
+        )
+
+    if not target_path.is_file():
+        m5.util.fatal(
+            f"L2 shared-private restore file not found in gem5 uarch "
+            f"directory: {target_path}. Multicore L1 warm restore requires "
+            "the matching shared-private L2/directory state."
+        )
+
+    return str(target_path)
+
+
 def discover_l1i_restore_files(options):
     if not getattr(options, "restore_l1i_state", False):
         return {}
 
     if getattr(options, "num_cpus", 0) != 1:
-        fatal(
+        m5.util.warn(
             "L1I warm restore is currently validated only for single-core "
-            "runs; multicore restore requires coherent L2/directory state. "
-            "Got %d CPUs." % getattr(options, "num_cpus", 0)
+            "runs; continuing experimentally in multicore mode without a "
+            "coherence-safe private restore contract. Got %d CPUs."
+            % getattr(options, "num_cpus", 0)
         )
 
     if not getattr(options, "restore", None):
@@ -156,10 +195,11 @@ def discover_l1d_restore_files(options):
         return {}
 
     if getattr(options, "num_cpus", 0) != 1:
-        fatal(
+        m5.util.warn(
             "L1D warm restore is currently validated only for single-core "
-            "runs; multicore restore requires coherent L2/directory state. "
-            "Got %d CPUs." % getattr(options, "num_cpus", 0)
+            "runs; continuing experimentally in multicore mode without a "
+            "coherence-safe private restore contract. Got %d CPUs."
+            % getattr(options, "num_cpus", 0)
         )
 
     if not getattr(options, "restore", None):
@@ -222,6 +262,8 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     l1i_restore_files = discover_l1i_restore_files(options)
 
     l1d_restore_files = discover_l1d_restore_files(options)
+
+    l2_shared_restore_file = discover_l2_shared_restore_file(options)
 
     for i in range(options.num_cpus):
         #
@@ -304,6 +346,12 @@ def create_system(options, full_system, system, dma_ports, bootmem,
             "got %d L2 caches." % options.num_l2caches
         )
 
+    if l2_shared_restore_file and options.num_l2caches != 1:
+        fatal(
+            "multicore shared-private restore currently supports only "
+            "--num-l2caches=1; got %d L2 caches." % options.num_l2caches
+        )
+
     for i in range(options.num_l2caches):
         #
         # First create the Ruby objects associated with this cpu
@@ -331,6 +379,15 @@ def create_system(options, full_system, system, dma_ports, bootmem,
                                       llc_restore_file=(
                                           restore_file
                                           if i == 0 and restore_file
+                                          else ""
+                                      ),
+                                      restore_shared_private_state=(
+                                          i == 0
+                                          and bool(l2_shared_restore_file)
+                                      ),
+                                      shared_private_restore_file=(
+                                          l2_shared_restore_file
+                                          if i == 0 and l2_shared_restore_file
                                           else ""
                                       ),
                                       transitions_per_cycle = options.ports,
@@ -370,6 +427,10 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     for dir_cntrl in dir_cntrl_nodes:
         dir_cntrl.restore_llc_state = bool(restore_file)
         dir_cntrl.llc_restore_file = restore_file if restore_file else ""
+        dir_cntrl.restore_shared_private_state = bool(l2_shared_restore_file)
+        dir_cntrl.shared_private_restore_file = (
+            l2_shared_restore_file if l2_shared_restore_file else ""
+        )
         # Connect the directory controllers and the network
         dir_cntrl.requestToDir = MessageBuffer()
         dir_cntrl.requestToDir.in_port = ruby_system.network.out_port
