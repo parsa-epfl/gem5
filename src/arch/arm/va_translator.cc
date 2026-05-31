@@ -28,6 +28,7 @@
 
 #include "arch/arm/va_translator.hh"
 
+#include <cstdio>
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -78,12 +79,29 @@ VATranslator::parseJSON()
         return;
     }
 
-    std::ifstream f(vaFile);
-    if (!f.is_open())
-        fatal("ArmVATranslator: cannot open va_file '%s'\n", vaFile);
-
-    nlohmann::json root = nlohmann::json::parse(f, nullptr,
-                                                /*allow_exceptions=*/false);
+    // Support both plain JSON and zstd-compressed JSON transparently
+    nlohmann::json root;
+    if (vaFile.size() > 5 && vaFile.substr(vaFile.size() - 5) == ".zstd") {
+        std::string cmd = "zstd -d -c -- " + vaFile;
+        FILE *pipe = popen(cmd.c_str(), "r");
+        if (!pipe)
+            fatal("ArmVATranslator: cannot decompress va_file '%s'\n",
+                  vaFile);
+        std::string json;
+        char buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), pipe)) > 0)
+            json.append(buf, n);
+        pclose(pipe);
+        root = nlohmann::json::parse(json, nullptr,
+                                     /*allow_exceptions=*/false);
+    } else {
+        std::ifstream f(vaFile);
+        if (!f.is_open())
+            fatal("ArmVATranslator: cannot open va_file '%s'\n", vaFile);
+        root = nlohmann::json::parse(f, nullptr,
+                                     /*allow_exceptions=*/false);
+    }
     if (root.is_discarded())
         fatal("ArmVATranslator: JSON parse error in '%s'\n", vaFile);
 
