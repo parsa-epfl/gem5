@@ -490,7 +490,23 @@ def discover_moesi_l1d_clean_restore_files(options):
 
 
 def define_options(parser):
-    return
+    parser.add_argument(
+        "--observe-restored-nonllc-getx",
+        action="store_true",
+        help=(
+            "Log when a warm-restored non-LLC private-sharer line reaches "
+            "the L2 ILS->L1_GETX upgrade path."
+        ),
+    )
+    parser.add_argument(
+        "--fatal-on-restored-nonllc-getx",
+        action="store_true",
+        help=(
+            "Abort when a warm-restored non-LLC private-sharer line reaches "
+            "the L2 ILS->L1_GETX upgrade path."
+        ),
+    )
+
 
 def create_system(options, full_system, system, dma_ports, bootmem,
                   ruby_system, cpus):
@@ -543,6 +559,12 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     )
     private_instruction_nonllc_restore_file = (
         discover_moesi_private_instruction_only_nonllc_restore_file(options)
+    )
+    multi_clean_nonllc_directory_enabled = bool(
+        private_multi_clean_nonllc_restore_file
+    )
+    instruction_nonllc_directory_enabled = bool(
+        private_instruction_nonllc_restore_file
     )
     multi_clean_enabled = bool(private_multi_clean_restore_file)
     multi_clean_nonllc_enabled = bool(
@@ -789,6 +811,12 @@ def create_system(options, full_system, system, dma_ports, bootmem,
         l2_cntrl.private_multi_clean_nonllc_restore_file = (
             private_multi_clean_nonllc_restore_file_arg
         )
+        l2_cntrl.observe_restored_nonllc_getx = bool(
+            getattr(options, "observe_restored_nonllc_getx", False)
+        )
+        l2_cntrl.fatal_on_restored_nonllc_getx = bool(
+            getattr(options, "fatal_on_restored_nonllc_getx", False)
+        )
 
         exec("ruby_system.l2_cntrl%d = l2_cntrl" % i)
         l2_cntrl_nodes.append(l2_cntrl)
@@ -830,6 +858,22 @@ def create_system(options, full_system, system, dma_ports, bootmem,
         )
         dir_cntrl.private_owner_restore_file = (
             private_owner_restore_file if private_owner_restore_file else ""
+        )
+        dir_cntrl.restore_private_multi_clean_nonllc_state = (
+            multi_clean_nonllc_directory_enabled
+        )
+        dir_cntrl.private_multi_clean_nonllc_restore_file = (
+            private_multi_clean_nonllc_restore_file
+            if private_multi_clean_nonllc_restore_file
+            else ""
+        )
+        dir_cntrl.restore_private_instruction_nonllc_state = (
+            instruction_nonllc_directory_enabled
+        )
+        dir_cntrl.private_instruction_nonllc_restore_file = (
+            private_instruction_nonllc_restore_file
+            if private_instruction_nonllc_restore_file
+            else ""
         )
         # Connect the directory controllers and the network
         dir_cntrl.requestToDir = MessageBuffer()

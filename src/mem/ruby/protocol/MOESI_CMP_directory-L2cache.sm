@@ -60,6 +60,8 @@ machine(MachineType:L2Cache, "Token protocol")
   bool warm_restore_private_multi_clean_nonllc_mode := "False";
   bool warm_restore_private_instruction_mode := "False";
   bool warm_restore_private_instruction_nonllc_mode := "False";
+  bool observe_restored_nonllc_getx := "False";
+  bool fatal_on_restored_nonllc_getx := "False";
   Cycles response_latency := 1;
   Cycles request_latency := 1;
 
@@ -223,6 +225,7 @@ machine(MachineType:L2Cache, "Token protocol")
     NetDest Sharers,            desc="Set of the internal processors that want the block in shared state";
     MachineID Owner,   desc="ID of the L1 cache to forward the block to once we get a response";
     bool OwnerValid, default="false", desc="true if Owner means something";
+    bool RestoredNonLlcSharer, default="false", desc="true when this local-directory entry was seeded from a non-LLC warm-restore sharer file";
     State DirState,        desc="directory state";
   }
 
@@ -379,6 +382,7 @@ machine(MachineType:L2Cache, "Token protocol")
         DirEntry dir_entry := getDirEntry(addr);
         dir_entry.Sharers.clear();
         dir_entry.OwnerValid := false;
+        dir_entry.RestoredNonLlcSharer := false;
       }
       DirEntry dir_entry := getDirEntry(addr);
       dir_entry.Sharers.add(shar_id);
@@ -400,6 +404,7 @@ machine(MachineType:L2Cache, "Token protocol")
       DirEntry dir_entry := getDirEntry(addr);
       dir_entry.Sharers.clear();
       dir_entry.OwnerValid := true;
+      dir_entry.RestoredNonLlcSharer := false;
       dir_entry.Owner := exc_id;
     }
   }
@@ -414,6 +419,7 @@ machine(MachineType:L2Cache, "Token protocol")
       DirEntry dir_entry := getDirEntry(addr);
       dir_entry.Sharers.clear();
       dir_entry.OwnerValid := false;
+      dir_entry.RestoredNonLlcSharer := false;
     }
   }
 
@@ -640,6 +646,8 @@ machine(MachineType:L2Cache, "Token protocol")
     recordLocalSharerInDir(
         cache_entry, addr, createMachineID(MachineType:L1Cache, sharer_core)
     );
+    DirEntry dir_entry := getDirEntry(addr);
+    dir_entry.RestoredNonLlcSharer := true;
     setState(TBEs[addr], cache_entry, addr, State:ILS);
   }
 
@@ -1385,6 +1393,22 @@ machine(MachineType:L2Cache, "Token protocol")
   action(gg_clearSharerFromL1Request, "clsl1r", desc="Clear sharer from L1 request queue") {
     peek(L1requestNetwork_in, RequestMsg) {
       removeSharerFromDir(cache_entry, in_msg.addr, in_msg.Requestor);
+    }
+  }
+
+  action(v_observeRestoredNonLlcGetX, "v", desc="Observe restored non-LLC sharers reaching the local GETX path") {
+    if (observe_restored_nonllc_getx || fatal_on_restored_nonllc_getx) {
+      if (localDirectory.isTagPresent(address)) {
+        DirEntry dir_entry := getDirEntry(address);
+        if (dir_entry.RestoredNonLlcSharer) {
+          if (observe_restored_nonllc_getx) {
+            DPRINTF(RubySlicc, "Observed restored non-LLC sharer line on ILS->L1_GETX addr: %#x\n", address);
+          }
+          if (fatal_on_restored_nonllc_getx) {
+            error("Observed restored non-LLC sharer line on ILS->L1_GETX");
+          }
+        }
+      }
     }
   }
 
@@ -2319,6 +2343,7 @@ machine(MachineType:L2Cache, "Token protocol")
   }
 
   transition(ILS, L1_GETX, IGMLS) {
+    v_observeRestoredNonLlcGetX;
     i_allocateTBE;
     s_recordGetXL1ID;
     a_issueGETX;
