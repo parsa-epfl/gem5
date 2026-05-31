@@ -621,9 +621,9 @@ class Fetch
     bool issuePipelinedIfetch[MaxThreads];
     /** One-shot latch to predecode the recovered line after fallback. */
     bool pendingPredecodeRecovery[MaxThreads];
-    /** Defer destructive fetch-buffer teardown until the active fetch
-     * iteration finishes its current bookkeeping. */
-    bool pendingPredictorRecoveryFlush[MaxThreads];
+    /** One-shot latch to suppress same-iteration reuse of a fetch
+     * buffer head that predictor recovery has already torn down. */
+    bool pendingPredictorRecoveryRestart[MaxThreads];
 
     /** Event used to delay fault generation of translation faults */
     FinishTranslationEvent finishTranslationEvent;

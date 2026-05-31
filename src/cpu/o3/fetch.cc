@@ -200,7 +200,7 @@ Fetch::Fetch(CPU *_cpu, const O3CPUParams &params)
         lastIcacheStall[i] = 0;
         issuePipelinedIfetch[i] = false;
         pendingPredecodeRecovery[i] = false;
-        pendingPredictorRecoveryFlush[i] = false;
+        pendingPredictorRecoveryRestart[i] = false;
         seq[i] = 1;
         brseq[i] = 0;
     }
@@ -459,7 +459,7 @@ Fetch::clearStates(ThreadID tid)
     prefetchBufferActualPC[tid].clear();
     prefetchBufferSeqNum[tid].clear();
     pendingPredecodeRecovery[tid] = false;
-    pendingPredictorRecoveryFlush[tid] = false;
+    pendingPredictorRecoveryRestart[tid] = false;
     lastProcessedLine = 0;
     lastAddrFetched = 0;
     // TODO not sure what to do with priorityList for now
@@ -489,7 +489,7 @@ Fetch::resetStage()
         fetchOffset[tid] = 0;
         macroop[tid] = NULL;
         pendingPredecodeRecovery[tid] = false;
-        pendingPredictorRecoveryFlush[tid] = false;
+        pendingPredictorRecoveryRestart[tid] = false;
 
         delayedCommit[tid] = false;
         //memReq[tid] = NULL;
@@ -1265,7 +1265,17 @@ Fetch::lookupAndUpdateNextPC(const DynInstPtr &inst, TheISA::PCState &nextPC)
         prefetchBufferSeqNum[tid].clear();
         lastProcessedLine = 0;
         lastAddrFetched = 0;
-        pendingPredictorRecoveryFlush[tid] = true;
+        pendingPredictorRecoveryRestart[tid] = true;
+        macroop[tid] = NULL;
+        cleanupFetchBuffer(fetchBuffer[tid].begin(), fetchBuffer[tid].end());
+        fetchBuffer[tid].clear();
+        fetchBufferPC[tid].clear();
+        fetchBufferReqPtr[tid].clear();
+        fetchBufferSeqNum[tid].clear();
+        fetchBufferValid[tid].clear();
+        add_front = false;
+        memReq[tid].clear();
+        decoder[tid]->reset();
     }
 
     //if (prefetchQueue[0].size()==0){
@@ -3711,7 +3721,14 @@ Fetch::fetch(bool &status_change)
             if (newMacro) {
                 fetchAddr = thisPC.instAddr() & pc_mask;
                 //blkOffset = (fetchAddr - fetchBufferPC[tid]) / instSize;
-                blkOffset = (fetchAddr - fetchBufferPC[tid].front()) / instSize;
+                if (pendingPredictorRecoveryRestart[tid]) {
+                    blkOffset = fetchBufferSize;
+                    pendingPredictorRecoveryRestart[tid] = false;
+                } else {
+                    blkOffset =
+                        (fetchAddr - fetchBufferPC[tid].front()) /
+                        instSize;
+                }
                 pcOffset = 0;
                 curMacroop = NULL;
             }
@@ -3745,11 +3762,6 @@ Fetch::fetch(bool &status_change)
                 "fetch buffer.\n", tid);
     }
 
-    if (pendingPredictorRecoveryFlush[tid]) {
-        curMacroop = NULL;
-        pcOffset = 0;
-    }
-
     macroop[tid] = curMacroop;
     fetchOffset[tid] = pcOffset;
 
@@ -3759,18 +3771,7 @@ Fetch::fetch(bool &status_change)
 
     pc[tid] = thisPC;
 
-    if (pendingPredictorRecoveryFlush[tid]) {
-        cleanupFetchBuffer(fetchBuffer[tid].begin(), fetchBuffer[tid].end());
-        fetchBuffer[tid].clear();
-        fetchBufferPC[tid].clear();
-        fetchBufferReqPtr[tid].clear();
-        fetchBufferSeqNum[tid].clear();
-        fetchBufferValid[tid].clear();
-        add_front = false;
-        memReq[tid].clear();
-        decoder[tid]->reset();
-        pendingPredictorRecoveryFlush[tid] = false;
-    }
+    pendingPredictorRecoveryRestart[tid] = false;
 
     // pipeline a fetch if we're crossing a fetch buffer boundary and not in
     // a state that would preclude fetching
