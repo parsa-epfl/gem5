@@ -643,34 +643,51 @@ machine(MachineType:L2Cache, "Token protocol")
     setState(TBEs[addr], cache_entry, addr, State:ILS);
   }
 
-  void applyWarmLineAddr(Addr addr) {
+  NodeID decodeWarmCoreToken(Addr addr, std::string warm_state) {
+    if (warm_state == "") {
+      Addr line_addr := makeLineAddress(addr);
+      return intToID(addressOffset(addr, line_addr));
+    }
+    return intToID(stringToInt(warm_state));
+  }
+
+  void preloadWarmPrivateLineWithCore(Addr addr, NodeID warm_core) {
+    Addr line_addr := makeLineAddress(addr);
     if (warm_restore_private_owner_mode) {
-      Addr line_addr := makeLineAddress(addr);
-      NodeID owner_core := intToID(addressOffset(addr, line_addr));
-      preloadWarmPrivateOwnerLine(line_addr, owner_core);
+      preloadWarmPrivateOwnerLine(line_addr, warm_core);
     } else if (warm_restore_private_clean_mode) {
-      Addr line_addr := makeLineAddress(addr);
-      NodeID sharer_core := intToID(addressOffset(addr, line_addr));
-      preloadWarmPrivateCleanLine(line_addr, sharer_core);
+      preloadWarmPrivateCleanLine(line_addr, warm_core);
     } else if (warm_restore_private_instruction_mode) {
-      Addr line_addr := makeLineAddress(addr);
-      NodeID sharer_core := intToID(addressOffset(addr, line_addr));
-      preloadWarmPrivateCleanLine(line_addr, sharer_core);
+      preloadWarmPrivateCleanLine(line_addr, warm_core);
     } else if (warm_restore_private_multi_clean_nonllc_mode) {
-      Addr line_addr := makeLineAddress(addr);
-      NodeID sharer_core := intToID(addressOffset(addr, line_addr));
-      preloadWarmPrivateNonLlcSharerLine(line_addr, sharer_core);
+      preloadWarmPrivateNonLlcSharerLine(line_addr, warm_core);
     } else if (warm_restore_private_instruction_nonllc_mode) {
-      Addr line_addr := makeLineAddress(addr);
-      NodeID sharer_core := intToID(addressOffset(addr, line_addr));
-      preloadWarmPrivateNonLlcSharerLine(line_addr, sharer_core);
+      preloadWarmPrivateNonLlcSharerLine(line_addr, warm_core);
+    }
+  }
+
+  void applyWarmLineAddr(Addr addr) {
+    if (warm_restore_private_owner_mode ||
+        warm_restore_private_clean_mode ||
+        warm_restore_private_instruction_mode ||
+        warm_restore_private_multi_clean_nonllc_mode ||
+        warm_restore_private_instruction_nonllc_mode) {
+      preloadWarmPrivateLineWithCore(addr, decodeWarmCoreToken(addr, ""));
     } else if (warm_restore_llc_mode) {
       preloadWarmLine(makeLineAddress(addr));
     }
   }
 
   void applyWarmLineState(Addr addr, std::string warm_state) {
-    applyWarmLineAddr(addr);
+    if (warm_restore_private_owner_mode ||
+        warm_restore_private_clean_mode ||
+        warm_restore_private_instruction_mode ||
+        warm_restore_private_multi_clean_nonllc_mode ||
+        warm_restore_private_instruction_nonllc_mode) {
+      preloadWarmPrivateLineWithCore(addr, decodeWarmCoreToken(addr, warm_state));
+    } else {
+      applyWarmLineAddr(addr);
+    }
   }
 
   void startupWarmState() {

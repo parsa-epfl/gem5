@@ -49,6 +49,7 @@ NodeID intToID(int nodenum);
 int IDToInt(NodeID id);
 int addressToInt(Addr addr);
 Addr intToAddress(int addr);
+int stringToInt(std::string value);
 int addressOffset(Addr addr, Addr base);
 int max_tokens();
 Addr makeLineAddress(Addr addr);

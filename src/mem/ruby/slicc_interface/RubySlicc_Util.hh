@@ -48,6 +48,7 @@
 
 #include <cassert>
 #include <climits>
+#include <cstdlib>
 
 #include "debug/RubySlicc.hh"
 #include "mem/packet.hh"
@@ -96,6 +97,18 @@ intToAddress(int addr)
 {
     assert(!(addr & 0xffffffff00000000));
     return addr;
+}
+
+inline int
+stringToInt(const std::string& value)
+{
+    char *end = nullptr;
+    long parsed = std::strtol(value.c_str(), &end, 10);
+    if (value.empty() || end == value.c_str() || *end != '\0' ||
+        parsed < INT_MIN || parsed > INT_MAX) {
+        panic("invalid Ruby warm-state integer token: %s", value.c_str());
+    }
+    return static_cast<int>(parsed);
 }
 
 inline int
