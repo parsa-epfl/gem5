@@ -56,6 +56,7 @@ from common import MemConfig
 from common.cores.arm import HPI
 
 import devices
+from m5.objects import ArmVATranslator
 
 
 default_kernel = 'vmlinux.arm64'
@@ -164,6 +165,28 @@ def create(args):
     # within the cluster.
     system.addCaches(want_caches, last_cache_level=3)
 
+    # If a VA translation file is provided, instantiate one ArmVATranslator
+    # per CPU core. Each translator runs at startup(), processes only its own
+    # CPU's data from the JSON, writes results to checkpoint file, then calls exitSimLoop.
+    if args.va_file:
+        va_translators = []
+        cpu_id = 0
+        for cluster in system.cpu_cluster:
+            for cpu in cluster.cpus:
+                va_translators.append(
+                    ArmVATranslator(
+                        cpu=cpu,
+                        itb=cpu.mmu.itb,
+                        dtb=cpu.mmu.dtb,
+                        cpu_id=cpu_id,
+                        va_file=args.va_file,
+                        out_dir=args.tlb_output_dir,
+                        exit_on_completion=True,
+                    )
+                )
+                cpu_id += 1
+        system.va_translators = va_translators
+
     # Setup gem5's minimal Linux boot loader.
     system.realview.setupBootLoader(system, SysPaths.binary, args.bootloader)
     #system.realview.setupBootLoader(system, SysPaths.binary)
@@ -221,7 +244,7 @@ def parse_stats(args):
 
 def run(args):
     cptdir = m5.options.outdir
-    if args.checkpoint:
+    if args.checkpoint or args.generate_checkpoint:
         print("Checkpoint directory: %s" % cptdir)
 
     if args.warmup_insts:
@@ -247,6 +270,12 @@ def run(args):
         else:
             print(exit_msg, " @ ", m5.curTick())
             break
+
+    if args.generate_checkpoint:
+        print("Generating checkpoint at tick %d" % m5.curTick())
+        cpt_dir = os.path.join(m5.options.outdir, "cpt.%d" % m5.curTick())
+        m5.checkpoint(cpt_dir)
+        print("Checkpoint done.")
 
     m5.stats.dump()
     sys.exit(event.getCode())
@@ -292,9 +321,19 @@ def main():
     #                    default="1GB",
     #                    help="Specify the physical memory size")
     parser.add_argument("--checkpoint", action="store_true")
+    parser.add_argument("--generate-checkpoint", action="store_true",
+                        help="Generate a checkpoint at the end of simulation")
     parser.add_argument("--restore", type=str, default=None)
     parser.add_argument("--branch-trace", action="store_true",
                         help="Enable per-core branch trace logging")
+    parser.add_argument("--va-file", type=str, default=None,
+                        help="WormCacheQFlex MMU snapshot JSON file "
+                             "(e.g. mmus-0.json). When set, gem5 instantiates "
+                             "an ArmVATranslator per core, runs VA->PA "
+                             "translations at startup, and exits.")
+    parser.add_argument("--tlb-output-dir", type=str, default=".",
+                        help="Output directory for TLB checkpoint files "
+                             "(default: .)")
 
 
     Options.addCommonOptions(parser)
