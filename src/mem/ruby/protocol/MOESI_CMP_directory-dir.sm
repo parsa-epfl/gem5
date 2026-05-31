@@ -40,6 +40,18 @@
 
 machine(MachineType:Directory, "Directory protocol")
 :  DirectoryMemory * directory;
+   bool restore_llc_state := "False";
+   std::string llc_restore_file := "";
+   bool restore_private_owner_state := "False";
+   std::string private_owner_restore_file := "";
+   bool restore_private_multi_clean_nonllc_state := "False";
+   std::string private_multi_clean_nonllc_restore_file := "";
+   bool restore_private_instruction_nonllc_state := "False";
+   std::string private_instruction_nonllc_restore_file := "";
+   bool warm_restore_llc_mode := "False";
+   bool warm_restore_private_owner_mode := "False";
+   bool warm_restore_private_multi_clean_nonllc_mode := "False";
+   bool warm_restore_private_instruction_nonllc_mode := "False";
    Cycles directory_latency := 6;
    Cycles to_memory_controller_latency := 1;
 
@@ -152,6 +164,8 @@ machine(MachineType:Directory, "Directory protocol")
   Tick cyclesToTicks(Cycles c);
   void set_tbe(TBE b);
   void unset_tbe();
+  MachineID mapAddressToMachine(Addr addr, MachineType mtype);
+  void startupWarmStateFromFile(std::string path);
 
   Entry getDirectoryEntry(Addr addr), return_by_pointer="yes" {
     Entry dir_entry := static_cast(Entry, "pointer", directory[addr]);
@@ -217,6 +231,78 @@ machine(MachineType:Directory, "Directory protocol")
       } else {
         assert(state == State:I);
       }
+    }
+  }
+
+  void seedWarmSharedDirectoryLine(Addr line_addr) {
+    if (directory.isPresent(line_addr)) {
+      Entry dir_entry := static_cast(Entry, "pointer", directory[line_addr]);
+      if (is_invalid(dir_entry)) {
+        dir_entry := allocateDirectoryEntry(line_addr);
+      }
+
+      dir_entry.DirectoryState := State:S;
+      dir_entry.Sharers.clear();
+      dir_entry.Sharers.add(mapAddressToMachine(line_addr, MachineType:L2Cache));
+      dir_entry.Owner.clear();
+      dir_entry.WaitingUnblocks := 0;
+      dir_entry.changePermission(Directory_State_to_permission(State:S));
+
+      DPRINTF(RubySlicc,
+              "Seeded directory warm-state for %#x sharer %s state %s\n",
+              line_addr,
+              mapAddressToMachine(line_addr, MachineType:L2Cache),
+              dir_entry.DirectoryState);
+    }
+  }
+
+  void applyWarmLineAddr(Addr addr) {
+    Addr line_addr := makeLineAddress(addr);
+    if (warm_restore_private_owner_mode) {
+      if (directory.isPresent(line_addr)) {
+        Entry dir_entry := static_cast(Entry, "pointer", directory[line_addr]);
+        if (is_invalid(dir_entry)) {
+          dir_entry := allocateDirectoryEntry(line_addr);
+        }
+
+        dir_entry.DirectoryState := State:M;
+        dir_entry.Sharers.clear();
+        dir_entry.Owner.clear();
+        dir_entry.Owner.add(mapAddressToMachine(line_addr, MachineType:L2Cache));
+        dir_entry.WaitingUnblocks := 0;
+        dir_entry.changePermission(Directory_State_to_permission(State:M));
+      }
+    } else if (warm_restore_llc_mode ||
+               warm_restore_private_multi_clean_nonllc_mode ||
+               warm_restore_private_instruction_nonllc_mode) {
+      seedWarmSharedDirectoryLine(line_addr);
+    }
+  }
+
+  void applyWarmLineState(Addr addr, std::string warm_state) {
+    applyWarmLineAddr(addr);
+  }
+
+  void startupWarmState() {
+    if (restore_llc_state) {
+      warm_restore_llc_mode := true;
+      startupWarmStateFromFile(llc_restore_file);
+      warm_restore_llc_mode := false;
+    }
+    if (restore_private_multi_clean_nonllc_state) {
+      warm_restore_private_multi_clean_nonllc_mode := true;
+      startupWarmStateFromFile(private_multi_clean_nonllc_restore_file);
+      warm_restore_private_multi_clean_nonllc_mode := false;
+    }
+    if (restore_private_instruction_nonllc_state) {
+      warm_restore_private_instruction_nonllc_mode := true;
+      startupWarmStateFromFile(private_instruction_nonllc_restore_file);
+      warm_restore_private_instruction_nonllc_mode := false;
+    }
+    if (restore_private_owner_state) {
+      warm_restore_private_owner_mode := true;
+      startupWarmStateFromFile(private_owner_restore_file);
+      warm_restore_private_owner_mode := false;
     }
   }
 

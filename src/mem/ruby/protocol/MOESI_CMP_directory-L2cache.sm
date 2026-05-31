@@ -40,6 +40,28 @@
 
 machine(MachineType:L2Cache, "Token protocol")
 : CacheMemory * L2cache;
+  bool restore_llc_state := "False";
+  std::string llc_restore_file := "";
+  bool restore_private_owner_state := "False";
+  std::string private_owner_restore_file := "";
+  bool restore_private_clean_state := "False";
+  std::string private_clean_restore_file := "";
+  bool restore_private_multi_clean_state := "False";
+  std::string private_multi_clean_restore_file := "";
+  bool restore_private_multi_clean_nonllc_state := "False";
+  std::string private_multi_clean_nonllc_restore_file := "";
+  bool restore_private_instruction_state := "False";
+  std::string private_instruction_restore_file := "";
+  bool restore_private_instruction_nonllc_state := "False";
+  std::string private_instruction_nonllc_restore_file := "";
+  bool warm_restore_llc_mode := "False";
+  bool warm_restore_private_owner_mode := "False";
+  bool warm_restore_private_clean_mode := "False";
+  bool warm_restore_private_multi_clean_nonllc_mode := "False";
+  bool warm_restore_private_instruction_mode := "False";
+  bool warm_restore_private_instruction_nonllc_mode := "False";
+  bool observe_restored_nonllc_getx := "False";
+  bool fatal_on_restored_nonllc_getx := "False";
   Cycles response_latency := 1;
   Cycles request_latency := 1;
 
@@ -203,6 +225,7 @@ machine(MachineType:L2Cache, "Token protocol")
     NetDest Sharers,            desc="Set of the internal processors that want the block in shared state";
     MachineID Owner,   desc="ID of the L1 cache to forward the block to once we get a response";
     bool OwnerValid, default="false", desc="true if Owner means something";
+    bool RestoredNonLlcSharer, default="false", desc="true when this local-directory entry was seeded from a non-LLC warm-restore sharer file";
     State DirState,        desc="directory state";
   }
 
@@ -249,6 +272,7 @@ machine(MachineType:L2Cache, "Token protocol")
   void set_tbe(TBE b);
   void unset_tbe();
   MachineID mapAddressToMachine(Addr addr, MachineType mtype);
+  void startupWarmStateFromFile(std::string path);
   void wakeUpAllBuffers(Addr a);
 
   // Latency for responses that fetch data from cache
@@ -358,6 +382,7 @@ machine(MachineType:L2Cache, "Token protocol")
         DirEntry dir_entry := getDirEntry(addr);
         dir_entry.Sharers.clear();
         dir_entry.OwnerValid := false;
+        dir_entry.RestoredNonLlcSharer := false;
       }
       DirEntry dir_entry := getDirEntry(addr);
       dir_entry.Sharers.add(shar_id);
@@ -379,6 +404,7 @@ machine(MachineType:L2Cache, "Token protocol")
       DirEntry dir_entry := getDirEntry(addr);
       dir_entry.Sharers.clear();
       dir_entry.OwnerValid := true;
+      dir_entry.RestoredNonLlcSharer := false;
       dir_entry.Owner := exc_id;
     }
   }
@@ -393,6 +419,7 @@ machine(MachineType:L2Cache, "Token protocol")
       DirEntry dir_entry := getDirEntry(addr);
       dir_entry.Sharers.clear();
       dir_entry.OwnerValid := false;
+      dir_entry.RestoredNonLlcSharer := false;
     }
   }
 
@@ -575,6 +602,140 @@ machine(MachineType:L2Cache, "Token protocol")
     }
   }
 
+  void preloadWarmLine(Addr addr) {
+    Entry cache_entry := getCacheEntry(addr);
+    if (is_invalid(cache_entry)) {
+      cache_entry := static_cast(Entry, "pointer",
+          L2cache.allocate(addr, new Entry));
+    }
+
+    assert(is_valid(cache_entry));
+    readDataFromMemory(addr, cache_entry.DataBlk);
+    cache_entry.Dirty := false;
+    cache_entry.Sharers.clear();
+    cache_entry.OwnerValid := false;
+    cache_entry.CacheState := State:S;
+    setAccessPermission(cache_entry, addr, State:S);
+    L2cache.setMRU(addr);
+    L2cache.markCheckpointLoad(addr);
+  }
+
+  void preloadWarmPrivateOwnerLine(Addr addr, NodeID owner_core) {
+    Entry cache_entry := getCacheEntry(addr);
+    assert(is_invalid(cache_entry));
+    recordNewLocalExclusiveInDir(
+        cache_entry, addr, createMachineID(MachineType:L1Cache, owner_core)
+    );
+    setState(TBEs[addr], cache_entry, addr, State:ILX);
+  }
+
+  void preloadWarmPrivateCleanLine(Addr addr, NodeID sharer_core) {
+    Entry cache_entry := getCacheEntry(addr);
+    assert(is_valid(cache_entry));
+    recordLocalSharerInDir(
+        cache_entry, addr, createMachineID(MachineType:L1Cache, sharer_core)
+    );
+    setState(TBEs[addr], cache_entry, addr, State:SLS);
+  }
+
+  void preloadWarmPrivateNonLlcSharerLine(
+      Addr addr, NodeID sharer_core
+  ) {
+    Entry cache_entry := getCacheEntry(addr);
+    assert(is_invalid(cache_entry));
+    recordLocalSharerInDir(
+        cache_entry, addr, createMachineID(MachineType:L1Cache, sharer_core)
+    );
+    DirEntry dir_entry := getDirEntry(addr);
+    dir_entry.RestoredNonLlcSharer := true;
+    setState(TBEs[addr], cache_entry, addr, State:ILS);
+  }
+
+  NodeID decodeWarmCoreToken(Addr addr, std::string warm_state) {
+    if (warm_state == "") {
+      Addr line_addr := makeLineAddress(addr);
+      return intToID(addressOffset(addr, line_addr));
+    }
+    return intToID(stringToInt(warm_state));
+  }
+
+  void preloadWarmPrivateLineWithCore(Addr addr, NodeID warm_core) {
+    Addr line_addr := makeLineAddress(addr);
+    if (warm_restore_private_owner_mode) {
+      preloadWarmPrivateOwnerLine(line_addr, warm_core);
+    } else if (warm_restore_private_clean_mode) {
+      preloadWarmPrivateCleanLine(line_addr, warm_core);
+    } else if (warm_restore_private_instruction_mode) {
+      preloadWarmPrivateCleanLine(line_addr, warm_core);
+    } else if (warm_restore_private_multi_clean_nonllc_mode) {
+      preloadWarmPrivateNonLlcSharerLine(line_addr, warm_core);
+    } else if (warm_restore_private_instruction_nonllc_mode) {
+      preloadWarmPrivateNonLlcSharerLine(line_addr, warm_core);
+    }
+  }
+
+  void applyWarmLineAddr(Addr addr) {
+    if (warm_restore_private_owner_mode ||
+        warm_restore_private_clean_mode ||
+        warm_restore_private_instruction_mode ||
+        warm_restore_private_multi_clean_nonllc_mode ||
+        warm_restore_private_instruction_nonllc_mode) {
+      preloadWarmPrivateLineWithCore(addr, decodeWarmCoreToken(addr, ""));
+    } else if (warm_restore_llc_mode) {
+      preloadWarmLine(makeLineAddress(addr));
+    }
+  }
+
+  void applyWarmLineState(Addr addr, std::string warm_state) {
+    if (warm_restore_private_owner_mode ||
+        warm_restore_private_clean_mode ||
+        warm_restore_private_instruction_mode ||
+        warm_restore_private_multi_clean_nonllc_mode ||
+        warm_restore_private_instruction_nonllc_mode) {
+      preloadWarmPrivateLineWithCore(addr, decodeWarmCoreToken(addr, warm_state));
+    } else {
+      applyWarmLineAddr(addr);
+    }
+  }
+
+  void startupWarmState() {
+    if (restore_llc_state) {
+      warm_restore_llc_mode := true;
+      startupWarmStateFromFile(llc_restore_file);
+      warm_restore_llc_mode := false;
+    }
+    if (restore_private_clean_state) {
+      warm_restore_private_clean_mode := true;
+      startupWarmStateFromFile(private_clean_restore_file);
+      warm_restore_private_clean_mode := false;
+    }
+    if (restore_private_multi_clean_state) {
+      warm_restore_private_clean_mode := true;
+      startupWarmStateFromFile(private_multi_clean_restore_file);
+      warm_restore_private_clean_mode := false;
+    }
+    if (restore_private_multi_clean_nonllc_state) {
+      warm_restore_private_multi_clean_nonllc_mode := true;
+      startupWarmStateFromFile(private_multi_clean_nonllc_restore_file);
+      warm_restore_private_multi_clean_nonllc_mode := false;
+    }
+    if (restore_private_instruction_state) {
+      warm_restore_private_instruction_mode := true;
+      startupWarmStateFromFile(private_instruction_restore_file);
+      warm_restore_private_instruction_mode := false;
+    }
+    if (restore_private_instruction_nonllc_state) {
+      warm_restore_private_instruction_nonllc_mode := true;
+      startupWarmStateFromFile(private_instruction_nonllc_restore_file);
+      warm_restore_private_instruction_nonllc_mode := false;
+    }
+    if (restore_private_owner_state) {
+      warm_restore_private_owner_mode := true;
+      startupWarmStateFromFile(private_owner_restore_file);
+      warm_restore_private_owner_mode := false;
+    }
+  }
+
   void functionalRead(Addr addr, Packet *pkt) {
     TBE tbe := TBEs[addr];
     Entry cache_entry := getCacheEntry(addr);
@@ -704,20 +865,23 @@ machine(MachineType:L2Cache, "Token protocol")
     if (L1requestNetwork_in.isReady(clockEdge())) {
       peek(L1requestNetwork_in, RequestMsg) {
         assert(in_msg.Destination.isElement(machineID));
+        Entry cache_entry := getCacheEntry(in_msg.addr);
+        if (is_valid(cache_entry)) {
+          L2cache.noteCheckpointLoadHit(in_msg.addr);
+        }
         if (in_msg.Type == CoherenceRequestType:GETX) {
           trigger(Event:L1_GETX, in_msg.addr,
-                  getCacheEntry(in_msg.addr), TBEs[in_msg.addr]);
+                  cache_entry, TBEs[in_msg.addr]);
         } else if (in_msg.Type == CoherenceRequestType:GETS) {
             trigger(Event:L1_GETS, in_msg.addr,
-                  getCacheEntry(in_msg.addr), TBEs[in_msg.addr]);
+                  cache_entry, TBEs[in_msg.addr]);
         } else if (in_msg.Type == CoherenceRequestType:PUTO) {
           trigger(Event:L1_PUTO, in_msg.addr,
-                  getCacheEntry(in_msg.addr), TBEs[in_msg.addr]);
+                  cache_entry, TBEs[in_msg.addr]);
         } else if (in_msg.Type == CoherenceRequestType:PUTX) {
           trigger(Event:L1_PUTX, in_msg.addr,
-                  getCacheEntry(in_msg.addr), TBEs[in_msg.addr]);
+                  cache_entry, TBEs[in_msg.addr]);
         } else if (in_msg.Type == CoherenceRequestType:PUTS) {
-          Entry cache_entry := getCacheEntry(in_msg.addr);
           if (isOnlySharer(cache_entry, in_msg.addr, in_msg.Requestor)) {
             trigger(Event:L1_PUTS_only, in_msg.addr,
                     cache_entry, TBEs[in_msg.addr]);
@@ -1229,6 +1393,22 @@ machine(MachineType:L2Cache, "Token protocol")
   action(gg_clearSharerFromL1Request, "clsl1r", desc="Clear sharer from L1 request queue") {
     peek(L1requestNetwork_in, RequestMsg) {
       removeSharerFromDir(cache_entry, in_msg.addr, in_msg.Requestor);
+    }
+  }
+
+  action(v_observeRestoredNonLlcGetX, "v", desc="Observe restored non-LLC sharers reaching the local GETX path") {
+    if (observe_restored_nonllc_getx || fatal_on_restored_nonllc_getx) {
+      if (localDirectory.isTagPresent(address)) {
+        DirEntry dir_entry := getDirEntry(address);
+        if (dir_entry.RestoredNonLlcSharer) {
+          if (observe_restored_nonllc_getx) {
+            DPRINTF(RubySlicc, "Observed restored non-LLC sharer line on ILS->L1_GETX addr: %#x\n", address);
+          }
+          if (fatal_on_restored_nonllc_getx) {
+            error("Observed restored non-LLC sharer line on ILS->L1_GETX");
+          }
+        }
+      }
     }
   }
 
@@ -2163,6 +2343,7 @@ machine(MachineType:L2Cache, "Token protocol")
   }
 
   transition(ILS, L1_GETX, IGMLS) {
+    v_observeRestoredNonLlcGetX;
     i_allocateTBE;
     s_recordGetXL1ID;
     a_issueGETX;
