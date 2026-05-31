@@ -70,13 +70,6 @@ namespace o3
 
 class CPU;
 
-#define FTQ_MAX_SIZE 10
-/** Nayana: FDIP based Fetch Target Queue. */
-extern std::deque<TheISA::PCState> prefetchQueue[FTQ_MAX_SIZE];
-extern std::deque<InstSeqNum> prefetchQueueSeqNum[FTQ_MAX_SIZE];
-extern std::deque<TheISA::PCState> prefetchQueueBr[FTQ_MAX_SIZE];
-extern std::deque<branch_prediction::BTBFillSource>
-    prefetchQueueBtbSource[FTQ_MAX_SIZE];
 
 /**
  * Fetch class handles both single threaded and SMT fetch. Its
@@ -315,7 +308,8 @@ class Fetch
      * @param pc The actual PC of the current instruction.
      * @return Any fault that occured.
      */
-    bool fetchCacheLine(Addr vaddr, ThreadID tid, Addr pc);
+    bool fetchCacheLine(Addr vaddr, ThreadID tid, Addr pc,
+                        InstSeqNum lineageSeq);
     void finishTranslation(const Fault &fault, const RequestPtr &mem_req);
 
 
@@ -532,7 +526,9 @@ class Fetch
     std::list<Addr> fetchBufferPC[MaxThreads];
     std::list<Addr> prefetchBufferPC[MaxThreads];
     std::list<Addr> prefetchBufferActualPC[MaxThreads];
+    std::list<InstSeqNum> prefetchBufferSeqNum[MaxThreads];
     std::list<RequestPtr> fetchBufferReqPtr[MaxThreads];
+    std::list<InstSeqNum> fetchBufferSeqNum[MaxThreads];
     bool add_front;
 
     /** The size of the fetch queue in micro-ops */
@@ -541,7 +537,18 @@ class Fetch
     /** Queue of fetched instructions. Per-thread to prevent HoL blocking. */
     std::deque<DynInstPtr> fetchQueue[MaxThreads];
 
-    /** Queue of to prefetch instructions. Per-thread to prevent HoL blocking. */
+    /** Nayana: FDIP-based Fetch Target Queue, private to this Fetch unit. */
+    std::deque<TheISA::PCState> prefetchQueue[MaxThreads];
+    std::deque<int> prefetchQueueBblSize[MaxThreads];
+    TheISA::PCState prevPC[MaxThreads];
+    std::deque<InstSeqNum> prefetchQueueSeqNum[MaxThreads];
+    std::deque<TheISA::PCState> prefetchQueueBr[MaxThreads];
+    std::deque<branch_prediction::BTBFillSource>
+        prefetchQueueBtbSource[MaxThreads];
+
+    /** Queue of instructions to prefetch.
+     * Per-thread to prevent HoL blocking.
+     */
     unsigned prefetchQueueSize;
 
 
@@ -614,6 +621,9 @@ class Fetch
     bool issuePipelinedIfetch[MaxThreads];
     /** One-shot latch to predecode the recovered line after fallback. */
     bool pendingPredecodeRecovery[MaxThreads];
+    /** One-shot latch to suppress same-iteration reuse of a fetch
+     * buffer head that predictor recovery has already torn down. */
+    bool pendingPredictorRecoveryRestart[MaxThreads];
 
     /** Event used to delay fault generation of translation faults */
     FinishTranslationEvent finishTranslationEvent;
@@ -678,6 +688,12 @@ class Fetch
         statistics::Formula rate;
         statistics::Scalar fetchTotalStarvations;
         statistics::Scalar fetchNonResteerStarvations;
+        statistics::Scalar fdipNoBblReturnZero;
+        statistics::Scalar fdipBackwardBranchPcReturnZero;
+        statistics::Scalar fdipFtqInstLimitReturnZero;
+        statistics::Scalar fdipTinyNextPcStopPrefetch;
+        statistics::Scalar fdipTinyTakenTargetObserved;
+        statistics::Scalar fdipLegacyTinyPredGuard;
     } fetchStats;
 };
 
