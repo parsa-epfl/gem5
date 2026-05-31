@@ -762,36 +762,12 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
                         tid, seqNum, pc, pc, RAS[tid].topIdx());
             }
 
-            if (inst->isDirectCtrl() || !iPred) {
+            if (inst->isDirectCtrl()) {
                 // For direct branches, the local frontend already knows the
                 // architected target once decode or BBL discovery has
                 // identified the branch. A second BTB lookup here is
-                // redundant and muddies hit/miss accounting, so keep the old
-                // BTB lookup code commented for reference and use the decoded
-                // direct target instead.
-                //
-                // Deferred follow-up: !iPred also routes indirect controls
-                // through this path. Keep the validated FDIP/BTB behavior
-                // stable on this branch and handle the no-indirect-predictor
-                // fallback semantics in a dedicated debug/fix pass.
-                //
-                // ++stats.BTBLookups;
-                // if (BTB.valid(bbladdr, tid)) {
-                //     ++stats.BTBHits;
-                //     predict_record.btbSource =
-                //         BTB.lookupSource(bbladdr, tid);
-                //     target = BTB.lookup(bbladdr, tid);
-                // } else {
-                //     pred_taken = false;
-                //     predict_record.predTaken = pred_taken;
-                //     if (!inst->isCall() && !inst->isReturn()) {
-                //         btbUpdate(tid, pc.instAddr(), bp_history);
-                //     } else if (inst->isCall() && !inst->isUncondCtrl()) {
-                //         RAS[tid].pop();
-                //         predict_record.pushedRAS = false;
-                //     }
-                //     inst->advancePC(target);
-                // }
+                // redundant and muddies hit/miss accounting, so use the
+                // decoded direct target instead.
                 target = inst->branchTarget(pc);
                 target.upc(0);
                 target.nupc(1);
@@ -799,6 +775,32 @@ BPredUnit::predict(const StaticInstPtr &inst, const InstSeqNum &seqNum,
                         "[tid:%i] [sn:%llu] Instruction %s predicted "
                         "direct target from decoded branch metadata as %s\n",
                         tid, seqNum, pc, target);
+            } else if (!iPred) {
+                ++stats.BTBLookups;
+                ++stats.bblBTBLookups;
+                if (BTB.valid(bbladdr, tid)) {
+                    ++stats.BTBHits;
+                    ++stats.bblBTBHits;
+                    predict_record.btbSource =
+                        BTB.lookupSource(bbladdr, tid);
+                    target = BTB.lookup(bbladdr, tid);
+                    DPRINTF(Branch,
+                            "[tid:%i] [sn:%llu] Instruction %s used FDIP "
+                            "BTB fallback target %s without indirect "
+                            "predictor\n",
+                            tid, seqNum, pc, target);
+                } else {
+                    ++stats.bblBTBMisses;
+                    pred_taken = false;
+                    predict_record.predTaken = pred_taken;
+                    if (!inst->isCall() && !inst->isReturn()) {
+                        btbUpdate(tid, pc.instAddr(), bp_history);
+                    } else if (inst->isCall() && !inst->isUncondCtrl()) {
+                        RAS[tid].pop();
+                        predict_record.pushedRAS = false;
+                    }
+                    inst->advancePC(target);
+                }
             } else {
                 predict_record.wasIndirect = true;
                 ++stats.indirectLookups;
