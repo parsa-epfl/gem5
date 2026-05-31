@@ -560,6 +560,13 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     private_instruction_nonllc_restore_file = (
         discover_moesi_private_instruction_only_nonllc_restore_file(options)
     )
+    owner_restore_enabled = bool(private_owner_restore_file)
+    if l1d_restore_files and not owner_restore_enabled:
+        m5.util.fatal(
+            "Found MOESI private-owner L1D restore files without the "
+            "matching aggregate owner metadata file. Refusing to warm L1D "
+            "owner state without L2/directory owner restore."
+        )
     multi_clean_nonllc_directory_enabled = bool(
         private_multi_clean_nonllc_restore_file
     )
@@ -608,10 +615,13 @@ def create_system(options, full_system, system, dma_ports, bootmem,
                                           )
                                       ),
                                       restore_l1d_state=(
-                                          i in l1d_restore_files
+                                          owner_restore_enabled
+                                          and i in l1d_restore_files
                                       ),
                                       l1d_restore_file=(
                                           l1d_restore_files.get(i, "")
+                                          if owner_restore_enabled
+                                          else ""
                                       ),
                                       restore_l1d_clean_state=(
                                           i in l1d_clean_restore_files
