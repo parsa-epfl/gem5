@@ -61,6 +61,7 @@ namespace ArmISA {
 class TableWalker;
 class Stage2LookUp;
 class TLB;
+class VATranslator;
 
 class TLBIALL;
 class TLBIALLEL;
@@ -108,6 +109,8 @@ class TlbTestInterface
 
 class TLB : public BaseTLB
 {
+  friend class VATranslator;
+
   public:
     enum ArmFlags
     {
@@ -242,6 +245,9 @@ class TLB : public BaseTLB
     int getsize() const { return size; }
 
     void insert(Addr vaddr, TlbEntry &pte);
+
+    void serialize(CheckpointOut &cp) const override;
+    void unserialize(CheckpointIn &cp) override;
 
     Fault getTE(TlbEntry **te, const RequestPtr &req,
                 ThreadContext *tc, BaseMMU::Mode mode,

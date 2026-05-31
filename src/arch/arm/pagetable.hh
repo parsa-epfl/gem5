@@ -331,6 +331,7 @@ struct TlbEntry : public Serializable
         SERIALIZE_SCALAR(hap);
         uint8_t domain_ = static_cast<uint8_t>(domain);
         paramOut(cp, "domain", domain_);
+        SERIALIZE_ENUM(el);
     }
     void
     unserialize(CheckpointIn &cp) override
@@ -362,6 +363,7 @@ struct TlbEntry : public Serializable
         uint8_t domain_;
         paramIn(cp, "domain", domain_);
         domain = static_cast<DomainType>(domain_);
+        UNSERIALIZE_ENUM(el);
     }
 
 };
