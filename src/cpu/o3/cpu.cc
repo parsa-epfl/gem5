@@ -385,6 +385,8 @@ CPU::CPUStats::CPUStats(CPU *cpu)
                "for an interrupt"),
       ADD_STAT(committedInsts, statistics::units::Count::get(),
                "Number of Instructions Simulated"),
+      ADD_STAT(committedUserInsts, statistics::units::Count::get(),
+               "Number of committed user-mode instructions"),
       ADD_STAT(committedOps, statistics::units::Count::get(),
                "Number of Ops (including micro ops) Simulated"),
       ADD_STAT(cpi, statistics::units::Rate<
@@ -439,6 +441,10 @@ CPU::CPUStats::CPUStats(CPU *cpu)
     // Should probably be in Base CPU but need templated
     // MaxThreads so put in here instead
     committedInsts
+        .init(cpu->numThreads)
+        .flags(statistics::total);
+
+    committedUserInsts
         .init(cpu->numThreads)
         .flags(statistics::total);
 
@@ -1426,6 +1432,9 @@ CPU::instDone(ThreadID tid, const DynInstPtr &inst)
         thread[tid]->numInst++;
         thread[tid]->threadStats.numInsts++;
         cpuStats.committedInsts[tid]++;
+        if (inst->tcBase()->getIsaPtr()->inUserMode()) {
+            cpuStats.committedUserInsts[tid]++;
+        }
 
         // Check for instruction-count-based events.
         thread[tid]->comInstEventQueue.serviceEvents(thread[tid]->numInst);

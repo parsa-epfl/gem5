@@ -692,6 +692,9 @@ class CPU : public BaseCPU
         statistics::Scalar quiesceCycles;
         /** Stat for the number of committed instructions per thread. */
         statistics::Vector committedInsts;
+        /** Stat for the number of committed user-mode instructions per
+         *  thread. */
+        statistics::Vector committedUserInsts;
         /** Stat for the number of committed ops (including micro ops) per
          *  thread. */
         statistics::Vector committedOps;
