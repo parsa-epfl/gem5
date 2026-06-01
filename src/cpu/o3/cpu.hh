@@ -612,6 +612,33 @@ class CPU : public BaseCPU
     /** Pointers to all of the threads in the CPU. */
     std::vector<ThreadState *> thread;
 
+    struct SpinCommitState
+    {
+        bool spinning = false;
+        uint32_t detectCount = 0;
+        uint32_t retireSinceReset = 0;
+        std::set<Addr> blockAddrs;
+        std::set<Addr> pcs;
+
+        void
+        resetDetection()
+        {
+            detectCount = 0;
+            retireSinceReset = 0;
+            blockAddrs.clear();
+            pcs.clear();
+        }
+
+        void
+        leaveSpin()
+        {
+            spinning = false;
+            resetDetection();
+        }
+    };
+
+    std::vector<SpinCommitState> spinCommitStates;
+
     /** Threads Scheduled to Enter CPU */
     std::list<int> cpuWaitList;
 
@@ -695,6 +722,12 @@ class CPU : public BaseCPU
         /** Stat for the number of committed user-mode instructions per
          *  thread. */
         statistics::Vector committedUserInsts;
+        /** Stat for the number of committed user-mode instructions per
+         *  thread while not in a detected spin loop. */
+        statistics::Vector committedNonSpinUserInsts;
+        /** Stat for the number of committed user-mode instructions per
+         *  thread while in a detected spin loop. */
+        statistics::Vector committedSpinUserInsts;
         /** Stat for the number of committed ops (including micro ops) per
          *  thread. */
         statistics::Vector committedOps;
@@ -731,6 +764,9 @@ class CPU : public BaseCPU
     // hardware transactional memory
     void htmSendAbortSignal(ThreadID tid, uint64_t htm_uid,
                             HtmFailureFaultCause cause);
+
+  private:
+    void updateSpinCommitState(ThreadID tid, const DynInstPtr &inst);
 };
 
 } // namespace o3
