@@ -271,6 +271,43 @@ TLB::printTlb() const
 }
 
 void
+TLB::serialize(CheckpointOut &cp) const
+{
+    SERIALIZE_SCALAR(size);
+    DPRINTF(TLB, "Serializing %d TLB entries\n", size);
+
+    for (int i = 0; i < size; i++) {
+        DPRINTF(TLB,
+                "  Serializing entry %d: vpn=0x%lx, pfn=0x%lx, valid=%d\n",
+                i, table[i].vpn, table[i].pfn, table[i].valid);
+        table[i].serializeSection(cp, csprintf("Entry%d", i));
+    }
+}
+
+void
+TLB::unserialize(CheckpointIn &cp)
+{
+    int size = 0;
+    if (!UNSERIALIZE_OPT_SCALAR(size)) {
+        DPRINTF(TLB, "No TLB checkpoint data found, keeping default state\n");
+        return;
+    }
+
+    DPRINTF(TLB, "Deserializing %d TLB entries\n", size);
+    if (size > this->size) {
+        fatal("ARM TLB size (%d) is smaller than the checkpointed size (%d)!",
+              this->size, size);
+    }
+
+    for (int i = 0; i < size; i++) {
+        DPRINTF(TLB, "  Deserializing entry %d\n", i);
+        table[i].unserializeSection(cp, csprintf("Entry%d", i));
+        DPRINTF(TLB, "    Entry %d restored: vpn=0x%lx, pfn=0x%lx, valid=%d\n",
+                i, table[i].vpn, table[i].pfn, table[i].valid);
+    }
+}
+
+void
 TLB::flushAll()
 {
     DPRINTF(TLB, "Flushing all TLB entries\n");
