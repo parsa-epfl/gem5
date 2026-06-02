@@ -94,6 +94,7 @@ if env['TARGET_ISA'] == 'arm':
     Source('self_debug.cc')
     Source('stage2_lookup.cc')
     Source('tlb.cc')
+    Source('tlb_restorer.cc')
     Source('tlbi_op.cc')
     Source('va_translator.cc')
     Source('utility.cc')
@@ -107,6 +108,7 @@ if env['TARGET_ISA'] == 'arm':
     SimObject('ArmSeWorkload.py')
     SimObject('ArmSystem.py')
     SimObject('ArmTLB.py')
+    SimObject('ArmTLBRestorer.py')
     SimObject('ArmPMU.py')
     SimObject('ArmVATranslator.py')
 
