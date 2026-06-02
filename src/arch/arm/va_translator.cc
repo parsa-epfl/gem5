@@ -133,8 +133,6 @@ VATranslator::parseJSON()
                         continue;
                     }
 
-                    const auto &mr = ent.at("misc_regs");
-
                     VaEntry e;
                     uint64_t vpn_json = ent.at("vpn").get<uint64_t>();
                     uint64_t ppn_json = ent.at("ppn").get<uint64_t>();
@@ -142,12 +140,23 @@ VATranslator::parseJSON()
                     e.vpn = vpn_json;
                     e.ppn = ppn_json;
                     e.mode = mode;
-                    e.cpsr = mr.at("cpsr").get<uint64_t>();
-                    e.sctlr_el1 = mr.at("sctlr_el1").get<uint64_t>();
-                    e.tcr_el1 = mr.at("tcr_el1").get<uint64_t>();
-                    e.ttbr0_el1 = mr.at("ttbr0_el1").get<uint64_t>();
-                    e.ttbr1_el1 = mr.at("ttbr1_el1").get<uint64_t>();
-                    e.mair_el1 = mr.at("mair_el1").get<uint64_t>();
+                    e.has_misc_regs = ent.contains("misc_regs");
+                    if (e.has_misc_regs) {
+                        const auto &mr = ent.at("misc_regs");
+                        e.cpsr = mr.at("cpsr").get<uint64_t>();
+                        e.sctlr_el1 = mr.at("sctlr_el1").get<uint64_t>();
+                        e.tcr_el1 = mr.at("tcr_el1").get<uint64_t>();
+                        e.ttbr0_el1 = mr.at("ttbr0_el1").get<uint64_t>();
+                        e.ttbr1_el1 = mr.at("ttbr1_el1").get<uint64_t>();
+                        e.mair_el1 = mr.at("mair_el1").get<uint64_t>();
+                    } else {
+                        e.cpsr = 0;
+                        e.sctlr_el1 = 0;
+                        e.tcr_el1 = 0;
+                        e.ttbr0_el1 = 0;
+                        e.ttbr1_el1 = 0;
+                        e.mair_el1 = 0;
+                    }
                     entries.push_back(e);
                 } catch (const nlohmann::json::exception &ex) {
                     warn("ArmVATranslator: skipping TLB entry "
@@ -164,6 +173,12 @@ VATranslator::parseJSON()
 void
 VATranslator::injectRegs(ThreadContext *tc, const VaEntry &e) const
 {
+    if (!e.has_misc_regs) {
+        DPRINTF(VATranslator, "CPU %d: entry for VA=%#x has no misc_regs; "
+                "using restored checkpoint EL1 state.\n", cpuId, e.va);
+        return;
+    }
+
     if (!(e.sctlr_el1 & 0x1)) {
         warn("ArmVATranslator: SCTLR_EL1.m=0 for VA=%#x -- MMU is off, "
              "walk will be skipped (identity map).\n", e.va);
