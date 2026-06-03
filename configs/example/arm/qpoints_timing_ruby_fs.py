@@ -231,6 +231,12 @@ def configure_tlb_geometry(system, args):
         cpu.mmu.dtb.size = dtb_size
 
 
+def configure_asid_geometry(system, args):
+    system.have_large_asid_64 = bool(
+        getattr(args, "have_large_asid_64", False)
+    )
+
+
 def discover_tlb_restore_files(args):
     if not getattr(args, "restore_tlb_state", False):
         return {}
@@ -273,7 +279,7 @@ def configure_tlb_restore(system, args):
     cpus = get_cpus(system)
 
     for cpu in cpus:
-        checkpoint_file = restore_files.get(cpu.cpu_id)
+        checkpoint_file = restore_files.get(int(cpu.cpu_id))
         if not checkpoint_file:
             continue
 
@@ -348,6 +354,7 @@ def create(args):
         readfile=args.script,
         m1=args.m1,
     )
+    configure_asid_geometry(system, args)
 
     system.realview.vio[0].vio = VirtIOBlock(
         image=create_cow_image(args.disk_image)
@@ -487,10 +494,12 @@ def main():
                         help="Number of CPU cores")
     parser.add_argument("--checkpoint", action="store_true")
     parser.add_argument("--restore", type=str, default=None)
-    parser.add_argument("--itb-size", type=int, default=256,
+    parser.add_argument("--itb-size", type=int, default=64,
                         help="Instruction TLB entry capacity")
-    parser.add_argument("--dtb-size", type=int, default=256,
+    parser.add_argument("--dtb-size", type=int, default=64,
                         help="Data TLB entry capacity")
+    parser.add_argument("--have-large-asid-64", action="store_true",
+                        help="Model AArch64 with 16-bit ASIDs enabled")
     parser.add_argument("--restore-tlb-state", action="store_true",
                         help="Restore staged TLB state when available")
     parser.add_argument("--branch-trace", action="store_true",
