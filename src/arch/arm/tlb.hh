@@ -110,6 +110,7 @@ class TlbTestInterface
 class TLB : public BaseTLB
 {
   friend class VATranslator;
+  friend class TLBRestorer;
 
   public:
     enum ArmFlags

@@ -140,6 +140,16 @@ VATranslator::parseJSON()
                     e.vpn = vpn_json;
                     e.ppn = ppn_json;
                     e.mode = mode;
+                    const auto &asid_json = ent.at("asid");
+                    if (asid_json.is_string()) {
+                        e.global = true;
+                        e.asid = 0;
+                    } else {
+                        e.global = false;
+                        e.asid = static_cast<uint16_t>(
+                            asid_json.at("NonGlobal").get<uint64_t>()
+                        );
+                    }
                     e.has_misc_regs = ent.contains("misc_regs");
                     if (e.has_misc_regs) {
                         const auto &mr = ent.at("misc_regs");
@@ -261,6 +271,8 @@ VATranslator::translateVA(const VaEntry *e, ThreadContext *tc)
     if (fault == NoFault && te != nullptr) {
         result.valid = true;
         result.tlbEntry = *te;
+        result.tlbEntry.asid = e->asid;
+        result.tlbEntry.global = e->global;
 
         if (e->vpn != te->vpn || e->ppn != te->pfn) {
             result.mismatch = true;

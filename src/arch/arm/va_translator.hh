@@ -57,6 +57,8 @@ class VATranslator : public SimObject
         BaseMMU::Mode mode;
         uint64_t vpn;
         uint64_t ppn;
+        uint16_t asid;
+        bool global;
         bool has_misc_regs;
         uint64_t cpsr;
         uint64_t sctlr_el1;
