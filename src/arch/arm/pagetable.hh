@@ -317,6 +317,7 @@ struct TlbEntry : public Serializable
         SERIALIZE_SCALAR(valid);
         SERIALIZE_SCALAR(ns);
         SERIALIZE_SCALAR(nstid);
+        SERIALIZE_ENUM(el);
         SERIALIZE_SCALAR(nonCacheable);
         SERIALIZE_ENUM(lookupLevel);
         SERIALIZE_ENUM(mtype);
@@ -347,6 +348,7 @@ struct TlbEntry : public Serializable
         UNSERIALIZE_SCALAR(valid);
         UNSERIALIZE_SCALAR(ns);
         UNSERIALIZE_SCALAR(nstid);
+        UNSERIALIZE_ENUM(el);
         UNSERIALIZE_SCALAR(nonCacheable);
         UNSERIALIZE_ENUM(lookupLevel);
         UNSERIALIZE_ENUM(mtype);

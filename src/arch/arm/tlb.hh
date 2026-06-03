@@ -61,6 +61,7 @@ namespace ArmISA {
 class TableWalker;
 class Stage2LookUp;
 class TLB;
+class VATranslator;
 
 class TLBIALL;
 class TLBIALLEL;
@@ -108,6 +109,9 @@ class TlbTestInterface
 
 class TLB : public BaseTLB
 {
+  friend class VATranslator;
+  friend class TLBRestorer;
+
   public:
     enum ArmFlags
     {
@@ -230,6 +234,9 @@ class TLB : public BaseTLB
     virtual ~TLB();
 
     void takeOverFrom(BaseTLB *otlb) override;
+
+    void serialize(CheckpointOut &cp) const override;
+    void unserialize(CheckpointIn &cp) override;
 
     void setTestInterface(SimObject *ti);
 

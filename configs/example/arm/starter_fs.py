@@ -57,6 +57,7 @@ from common import MemConfig
 from common.cores.arm import HPI
 
 import devices
+from m5.objects import ArmTLBRestorer, ArmVATranslator
 
 
 default_kernel = 'vmlinux.arm64'
@@ -184,6 +185,81 @@ def configure_tage_decision_trace(system, args):
             )
 
 
+def configure_tlb_geometry(system, args):
+    itb_size = int(getattr(args, 'itb_size', 256))
+    dtb_size = int(getattr(args, 'dtb_size', 256))
+
+    for cluster in getattr(system, 'cpu_cluster', []):
+        for cpu in cluster.cpus:
+            cpu.mmu.itb.size = itb_size
+            cpu.mmu.dtb.size = dtb_size
+
+
+def configure_asid_geometry(system, args):
+    system.have_large_asid_64 = bool(
+        getattr(args, "have_large_asid_64", False)
+    )
+
+
+def discover_tlb_restore_files(args):
+    if not getattr(args, "restore_tlb_state", False):
+        return {}
+
+    if not getattr(args, "restore", None):
+        m5.util.warn(
+            "--restore-tlb-state was set without --restore; "
+            "skipping TLB warm-state import."
+        )
+        return {}
+
+    restore_dir = Path(args.restore).resolve()
+    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+
+    if not gem5_uarch_dir.is_dir():
+        m5.util.warn(
+            f"gem5 uarch restore directory not found: {gem5_uarch_dir}. "
+            "Running with a cold TLB."
+        )
+        return {}
+
+    restore_files = {}
+    for core in range(getattr(args, "num_cores", 0)):
+        target_path = gem5_uarch_dir / f"mmu-cpu{core}.cpt"
+        if target_path.is_file():
+            restore_files[core] = str(target_path)
+
+    if not restore_files:
+        m5.util.warn(
+            f"No TLB restore files were found in {gem5_uarch_dir}. "
+            "Running with a cold TLB."
+        )
+
+    return restore_files
+
+
+def configure_tlb_restore(system, args):
+    restore_files = discover_tlb_restore_files(args)
+    restorers = []
+    for cluster in getattr(system, "cpu_cluster", []):
+        for cpu in cluster.cpus:
+            checkpoint_file = restore_files.get(int(cpu.cpu_id))
+            if not checkpoint_file:
+                continue
+
+            restorers.append(
+                ArmTLBRestorer(
+                    cpu=cpu,
+                    itb=cpu.mmu.itb,
+                    dtb=cpu.mmu.dtb,
+                    cpu_id=cpu.cpu_id,
+                    checkpoint_file=checkpoint_file,
+                )
+            )
+
+    if restorers:
+        system.tlb_restorers = restorers
+
+
 def create(args):
     ''' Create and configure the system object. '''
 
@@ -215,6 +291,7 @@ def create(args):
                                       SysPaths.binary(args.kernel)),
                                   readfile=args.script,
                                   m1=args.m1)
+    configure_asid_geometry(system, args)
 
     #CacheConfig.config_cache(args, system)
     MemConfig.config_mem(args, system)
@@ -252,6 +329,8 @@ def create(args):
                            args=args),
     ]
 
+    configure_tlb_geometry(system, args)
+    configure_tlb_restore(system, args)
     configure_tage_restore(system, args)
     configure_tage_decision_trace(system, args)
 
@@ -259,6 +338,54 @@ def create(args):
     # clusters have core-private L1 caches and an L2 that's shared
     # within the cluster.
     system.addCaches(want_caches, last_cache_level=3)
+
+    if args.va_file:
+        va_translators = []
+        target_cpu_id = args.va_cpu_id
+        if target_cpu_id is None:
+            cpu_id = 0
+            for cluster in system.cpu_cluster:
+                for cpu in cluster.cpus:
+                    va_translators.append(
+                        ArmVATranslator(
+                            cpu=cpu,
+                            itb=cpu.mmu.itb,
+                            dtb=cpu.mmu.dtb,
+                            cpu_id=cpu_id,
+                            va_file=args.va_file,
+                            out_dir=args.tlb_output_dir,
+                            exit_on_completion=True,
+                        )
+                    )
+                    cpu_id += 1
+        else:
+            cpu_id = 0
+            selected_cpu = None
+            for cluster in system.cpu_cluster:
+                for cpu in cluster.cpus:
+                    if cpu_id == target_cpu_id:
+                        selected_cpu = cpu
+                        break
+                    cpu_id += 1
+                if selected_cpu is not None:
+                    break
+            if selected_cpu is None:
+                m5.fatal(
+                    "Requested --va-cpu-id=%d, but system only has %d CPUs" %
+                    (target_cpu_id, args.num_cores)
+                )
+            va_translators.append(
+                ArmVATranslator(
+                    cpu=selected_cpu,
+                    itb=selected_cpu.mmu.itb,
+                    dtb=selected_cpu.mmu.dtb,
+                    cpu_id=target_cpu_id,
+                    va_file=args.va_file,
+                    out_dir=args.tlb_output_dir,
+                    exit_on_completion=True,
+                )
+            )
+        system.va_translators = va_translators
 
     # Setup gem5's minimal Linux boot loader.
     system.realview.setupBootLoader(system, SysPaths.binary, args.bootloader)
@@ -389,6 +516,23 @@ def main():
     #                    help="Specify the physical memory size")
     parser.add_argument("--checkpoint", action="store_true")
     parser.add_argument("--restore", type=str, default=None)
+    parser.add_argument(
+        "--itb-size",
+        type=int,
+        default=64,
+        help="Instruction TLB entry capacity",
+    )
+    parser.add_argument(
+        "--dtb-size",
+        type=int,
+        default=64,
+        help="Data TLB entry capacity",
+    )
+    parser.add_argument(
+        "--have-large-asid-64",
+        action="store_true",
+        help="Model AArch64 with 16-bit ASIDs enabled",
+    )
     parser.add_argument("--branch-trace", action="store_true",
                         help="Enable per-core branch trace logging")
     parser.add_argument("--data-trace", action="store_true",
@@ -397,6 +541,11 @@ def main():
         "--restore-tage-state",
         action="store_true",
         help="Restore staged TAGE predictor state when available")
+    parser.add_argument(
+        "--restore-tlb-state",
+        action="store_true",
+        help="Restore staged TLB state when available",
+    )
     parser.add_argument(
         "--tage-decision-trace",
         action="store_true",
@@ -409,6 +558,32 @@ def main():
             "Maximum number of conditional TAGE decisions to log "
             "(0 = unlimited)"
         ))
+    parser.add_argument(
+        "--va-file",
+        type=str,
+        default=None,
+        help=(
+            "WormCacheQFlex MMU snapshot JSON file (e.g. mmus-0.json or "
+            "mmus-0.json.zstd). When set, gem5 instantiates ArmVATranslator "
+            "helper(s), runs VA->PA translations at startup, writes "
+            "checkpoint-format TLB sections, and exits."
+        ),
+    )
+    parser.add_argument(
+        "--va-cpu-id",
+        type=int,
+        default=None,
+        help=(
+            "Optional CPU index to restrict the ArmVATranslator helper to a "
+            "single core. When omitted, gem5 instantiates one helper per core."
+        ),
+    )
+    parser.add_argument(
+        "--tlb-output-dir",
+        type=str,
+        default=".",
+        help="Output directory for mmu-cpuN.cpt checkpoint files",
+    )
 
 
     Options.addCommonOptions(parser)
