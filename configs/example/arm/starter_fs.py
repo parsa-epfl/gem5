@@ -341,21 +341,50 @@ def create(args):
 
     if args.va_file:
         va_translators = []
-        cpu_id = 0
-        for cluster in system.cpu_cluster:
-            for cpu in cluster.cpus:
-                va_translators.append(
-                    ArmVATranslator(
-                        cpu=cpu,
-                        itb=cpu.mmu.itb,
-                        dtb=cpu.mmu.dtb,
-                        cpu_id=cpu_id,
-                        va_file=args.va_file,
-                        out_dir=args.tlb_output_dir,
-                        exit_on_completion=True,
+        target_cpu_id = args.va_cpu_id
+        if target_cpu_id is None:
+            cpu_id = 0
+            for cluster in system.cpu_cluster:
+                for cpu in cluster.cpus:
+                    va_translators.append(
+                        ArmVATranslator(
+                            cpu=cpu,
+                            itb=cpu.mmu.itb,
+                            dtb=cpu.mmu.dtb,
+                            cpu_id=cpu_id,
+                            va_file=args.va_file,
+                            out_dir=args.tlb_output_dir,
+                            exit_on_completion=True,
+                        )
                     )
+                    cpu_id += 1
+        else:
+            cpu_id = 0
+            selected_cpu = None
+            for cluster in system.cpu_cluster:
+                for cpu in cluster.cpus:
+                    if cpu_id == target_cpu_id:
+                        selected_cpu = cpu
+                        break
+                    cpu_id += 1
+                if selected_cpu is not None:
+                    break
+            if selected_cpu is None:
+                m5.fatal(
+                    "Requested --va-cpu-id=%d, but system only has %d CPUs" %
+                    (target_cpu_id, args.num_cores)
                 )
-                cpu_id += 1
+            va_translators.append(
+                ArmVATranslator(
+                    cpu=selected_cpu,
+                    itb=selected_cpu.mmu.itb,
+                    dtb=selected_cpu.mmu.dtb,
+                    cpu_id=target_cpu_id,
+                    va_file=args.va_file,
+                    out_dir=args.tlb_output_dir,
+                    exit_on_completion=True,
+                )
+            )
         system.va_translators = va_translators
 
     # Setup gem5's minimal Linux boot loader.
@@ -535,9 +564,18 @@ def main():
         default=None,
         help=(
             "WormCacheQFlex MMU snapshot JSON file (e.g. mmus-0.json or "
-            "mmus-0.json.zstd). When set, gem5 instantiates one "
-            "ArmVATranslator per core, runs VA->PA translations at startup, "
-            "writes checkpoint-format TLB sections, and exits."
+            "mmus-0.json.zstd). When set, gem5 instantiates ArmVATranslator "
+            "helper(s), runs VA->PA translations at startup, writes "
+            "checkpoint-format TLB sections, and exits."
+        ),
+    )
+    parser.add_argument(
+        "--va-cpu-id",
+        type=int,
+        default=None,
+        help=(
+            "Optional CPU index to restrict the ArmVATranslator helper to a "
+            "single core. When omitted, gem5 instantiates one helper per core."
         ),
     )
     parser.add_argument(
