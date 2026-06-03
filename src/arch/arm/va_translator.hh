@@ -51,6 +51,16 @@ class VATranslator : public SimObject
     void startup() override;
 
   private:
+    struct BaselineRegs
+    {
+        uint64_t cpsr;
+        uint64_t sctlr_el1;
+        uint64_t tcr_el1;
+        uint64_t ttbr0_el1;
+        uint64_t ttbr1_el1;
+        uint64_t mair_el1;
+    };
+
     struct VaEntry
     {
         Addr va;
@@ -84,11 +94,13 @@ class VATranslator : public SimObject
     const int cpuId;
     const bool exitOnCompletion;
     std::vector<VaEntry> entries;
+    BaselineRegs baselineRegs{};
 
     void parseJSON();
     TranslationResult translateVA(const VaEntry *e, ThreadContext *tc);
     void writeResultsToCheckpoint(
         const std::vector<TranslationResult> &results) const;
+    void captureBaselineRegs(ThreadContext *tc);
     void injectRegs(ThreadContext *tc, const VaEntry &e) const;
 };
 

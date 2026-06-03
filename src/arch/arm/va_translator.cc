@@ -28,7 +28,9 @@
 
 #include "arch/arm/va_translator.hh"
 
-#include <cstdio>
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -65,6 +67,61 @@ VATranslator::VATranslator(const ArmVATranslatorParams &p)
 {
 }
 
+namespace
+{
+
+std::string
+readZstdFile(const std::string &path)
+{
+    int pipefd[2];
+    if (pipe(pipefd) != 0) {
+        fatal("ArmVATranslator: cannot create pipe for '%s'\n", path);
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        fatal("ArmVATranslator: cannot fork for '%s'\n", path);
+    }
+
+    if (pid == 0) {
+        close(pipefd[0]);
+        if (dup2(pipefd[1], STDOUT_FILENO) < 0) {
+            _exit(127);
+        }
+        close(pipefd[1]);
+        execlp("zstd", "zstd", "-d", "-c", "--", path.c_str(),
+               static_cast<char *>(nullptr));
+        _exit(127);
+    }
+
+    close(pipefd[1]);
+    std::string json;
+    char buf[4096];
+    ssize_t n = 0;
+    while ((n = read(pipefd[0], buf, sizeof(buf))) > 0) {
+        json.append(buf, n);
+    }
+    close(pipefd[0]);
+
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0) {
+        fatal("ArmVATranslator: waitpid failed for '%s'\n", path);
+    }
+    if (n < 0) {
+        fatal("ArmVATranslator: read failed while decompressing '%s'\n", path);
+    }
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+        fatal("ArmVATranslator: zstd failed for '%s' (status=%d)\n",
+              path, status);
+    }
+
+    return json;
+}
+
+} // anonymous namespace
+
 void
 VATranslator::parseJSON()
 {
@@ -77,19 +134,7 @@ VATranslator::parseJSON()
 
     nlohmann::json root;
     if (vaFile.size() > 5 && vaFile.substr(vaFile.size() - 5) == ".zstd") {
-        std::string cmd = "zstd -d -c -- " + vaFile;
-        FILE *pipe = popen(cmd.c_str(), "r");
-        if (!pipe) {
-            fatal("ArmVATranslator: cannot decompress va_file '%s'\n", vaFile);
-        }
-        std::string json;
-        char buf[4096];
-        size_t n;
-        while ((n = fread(buf, 1, sizeof(buf), pipe)) > 0) {
-            json.append(buf, n);
-        }
-        pclose(pipe);
-        root = nlohmann::json::parse(json, nullptr, false);
+        root = nlohmann::json::parse(readZstdFile(vaFile), nullptr, false);
     } else {
         std::ifstream f(vaFile);
         if (!f.is_open()) {
@@ -181,25 +226,41 @@ VATranslator::parseJSON()
 }
 
 void
+VATranslator::captureBaselineRegs(ThreadContext *tc)
+{
+    baselineRegs.cpsr = tc->readMiscRegNoEffect(MISCREG_CPSR);
+    baselineRegs.sctlr_el1 = tc->readMiscRegNoEffect(MISCREG_SCTLR_EL1);
+    baselineRegs.tcr_el1 = tc->readMiscRegNoEffect(MISCREG_TCR_EL1);
+    baselineRegs.ttbr0_el1 = tc->readMiscRegNoEffect(MISCREG_TTBR0_EL1);
+    baselineRegs.ttbr1_el1 = tc->readMiscRegNoEffect(MISCREG_TTBR1_EL1);
+    baselineRegs.mair_el1 = tc->readMiscRegNoEffect(MISCREG_MAIR_EL1);
+}
+
+void
 VATranslator::injectRegs(ThreadContext *tc, const VaEntry &e) const
 {
     if (!e.has_misc_regs) {
         DPRINTF(VATranslator, "CPU %d: entry for VA=%#x has no misc_regs; "
                 "using restored checkpoint EL1 state.\n", cpuId, e.va);
-        return;
-    }
+        tc->setMiscReg(MISCREG_CPSR, baselineRegs.cpsr);
+        tc->setMiscReg(MISCREG_SCTLR_EL1, baselineRegs.sctlr_el1);
+        tc->setMiscReg(MISCREG_TCR_EL1, baselineRegs.tcr_el1);
+        tc->setMiscReg(MISCREG_TTBR0_EL1, baselineRegs.ttbr0_el1);
+        tc->setMiscReg(MISCREG_TTBR1_EL1, baselineRegs.ttbr1_el1);
+        tc->setMiscReg(MISCREG_MAIR_EL1, baselineRegs.mair_el1);
+    } else {
+        if (!(e.sctlr_el1 & 0x1)) {
+            warn("ArmVATranslator: SCTLR_EL1.m=0 for VA=%#x -- MMU is off, "
+                 "walk will be skipped (identity map).\n", e.va);
+        }
 
-    if (!(e.sctlr_el1 & 0x1)) {
-        warn("ArmVATranslator: SCTLR_EL1.m=0 for VA=%#x -- MMU is off, "
-             "walk will be skipped (identity map).\n", e.va);
+        tc->setMiscReg(MISCREG_CPSR, e.cpsr);
+        tc->setMiscReg(MISCREG_SCTLR_EL1, e.sctlr_el1);
+        tc->setMiscReg(MISCREG_TCR_EL1, e.tcr_el1);
+        tc->setMiscReg(MISCREG_TTBR0_EL1, e.ttbr0_el1);
+        tc->setMiscReg(MISCREG_TTBR1_EL1, e.ttbr1_el1);
+        tc->setMiscReg(MISCREG_MAIR_EL1, e.mair_el1);
     }
-
-    tc->setMiscReg(MISCREG_CPSR, e.cpsr);
-    tc->setMiscReg(MISCREG_SCTLR_EL1, e.sctlr_el1);
-    tc->setMiscReg(MISCREG_TCR_EL1, e.tcr_el1);
-    tc->setMiscReg(MISCREG_TTBR0_EL1, e.ttbr0_el1);
-    tc->setMiscReg(MISCREG_TTBR1_EL1, e.ttbr1_el1);
-    tc->setMiscReg(MISCREG_MAIR_EL1, e.mair_el1);
     tc->setMiscReg(MISCREG_HCR_EL2, 0);
     tc->setMiscReg(MISCREG_SCR_EL3, 0);
 }
@@ -346,6 +407,7 @@ VATranslator::startup()
     DPRINTF(VATranslator, "Startup -- beginning VA translations\n");
 
     ThreadContext *tc = cpu->getContext(0);
+    captureBaselineRegs(tc);
 
     parseJSON();
 
