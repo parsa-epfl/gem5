@@ -115,6 +115,7 @@ CPU::CPU(const O3CPUParams &params)
       activityRec(name(), NumStages,
                   params.backComSize + params.forwardComSize,
                   params.activity),
+      spinCommitStates(numThreads),
 
       globalSeqNum(1),
       system(params.system),
@@ -385,6 +386,12 @@ CPU::CPUStats::CPUStats(CPU *cpu)
                "for an interrupt"),
       ADD_STAT(committedInsts, statistics::units::Count::get(),
                "Number of Instructions Simulated"),
+      ADD_STAT(committedUserInsts, statistics::units::Count::get(),
+               "Number of committed user-mode instructions"),
+      ADD_STAT(committedNonSpinUserInsts, statistics::units::Count::get(),
+               "Number of committed non-spin user-mode instructions"),
+      ADD_STAT(committedSpinUserInsts, statistics::units::Count::get(),
+               "Number of committed spin user-mode instructions"),
       ADD_STAT(committedOps, statistics::units::Count::get(),
                "Number of Ops (including micro ops) Simulated"),
       ADD_STAT(cpi, statistics::units::Rate<
@@ -439,6 +446,18 @@ CPU::CPUStats::CPUStats(CPU *cpu)
     // Should probably be in Base CPU but need templated
     // MaxThreads so put in here instead
     committedInsts
+        .init(cpu->numThreads)
+        .flags(statistics::total);
+
+    committedUserInsts
+        .init(cpu->numThreads)
+        .flags(statistics::total);
+
+    committedNonSpinUserInsts
+        .init(cpu->numThreads)
+        .flags(statistics::total);
+
+    committedSpinUserInsts
         .init(cpu->numThreads)
         .flags(statistics::total);
 
@@ -1419,6 +1438,61 @@ CPU::addInst(const DynInstPtr &inst)
 }
 
 void
+CPU::updateSpinCommitState(ThreadID tid, const DynInstPtr &inst)
+{
+    auto &state = spinCommitStates[tid];
+
+    if (!inst->isMemRef()) {
+        return;
+    }
+
+    const bool normal_load = inst->isLoad() &&
+        inst->translationCompleted() &&
+        inst->effAddrValid() &&
+        inst->memOpDone() &&
+        inst->fault == NoFault;
+
+    if (state.spinning) {
+        bool leave = !normal_load;
+
+        if (!leave) {
+            const Addr block_addr =
+                inst->physEffAddr & ~(Addr(cacheLineSize()) - 1);
+            leave = state.blockAddrs.count(block_addr) == 0;
+            if (!leave) {
+                leave = state.pcs.count(inst->instAddr()) == 0;
+            }
+        }
+
+        ++state.detectCount;
+        if (leave) {
+            state.leaveSpin();
+        }
+        return;
+    }
+
+    if (!normal_load) {
+        state.resetDetection();
+        return;
+    }
+
+    const Addr block_addr =
+        inst->physEffAddr & ~(Addr(cacheLineSize()) - 1);
+    state.blockAddrs.insert(block_addr);
+    state.pcs.insert(inst->instAddr());
+    ++state.detectCount;
+
+    if (state.blockAddrs.size() > 3 || state.pcs.size() > 3) {
+        state.resetDetection();
+        return;
+    }
+
+    if (state.detectCount > 24 || state.retireSinceReset > 99) {
+        state.spinning = true;
+    }
+}
+
+void
 CPU::instDone(ThreadID tid, const DynInstPtr &inst)
 {
     // Keep an instruction count.
@@ -1426,6 +1500,16 @@ CPU::instDone(ThreadID tid, const DynInstPtr &inst)
         thread[tid]->numInst++;
         thread[tid]->threadStats.numInsts++;
         cpuStats.committedInsts[tid]++;
+        spinCommitStates[tid].retireSinceReset++;
+        updateSpinCommitState(tid, inst);
+        if (inst->tcBase()->getIsaPtr()->inUserMode()) {
+            cpuStats.committedUserInsts[tid]++;
+            if (spinCommitStates[tid].spinning) {
+                cpuStats.committedSpinUserInsts[tid]++;
+            } else {
+                cpuStats.committedNonSpinUserInsts[tid]++;
+            }
+        }
 
         // Check for instruction-count-based events.
         thread[tid]->comInstEventQueue.serviceEvents(thread[tid]->numInst);

@@ -11,6 +11,7 @@ import sys
 import m5
 from m5.objects import *
 from m5.options import *
+from m5.util import convert
 
 m5.util.addToPath("../..")
 
@@ -426,10 +427,53 @@ def parse_stats(args):
     return found
 
 
+def cycles_to_ticks(args, cycles):
+    cycle_seconds = convert.anyToLatency(args.cpu_freq)
+    return m5.ticks.fromSeconds(float(cycles) * cycle_seconds)
+
+
+def run_cycle_phase(args, cycles, phase_name):
+    event = m5.simulate(cycles_to_ticks(args, cycles))
+    exit_msg = event.getCause()
+    if exit_msg != "simulate() limit reached":
+        print(
+            f"{phase_name} terminated before reaching {cycles} cycles:",
+            exit_msg,
+            "@",
+            m5.curTick(),
+        )
+        m5.stats.dump()
+        sys.exit(event.getCode())
+
+    m5.stats.dump()
+    return event
+
+
 def run(args):
     cptdir = m5.options.outdir
     if args.checkpoint:
         print("Checkpoint directory: %s" % cptdir)
+
+    if args.warmup_cycles and not args.measurement_cycles:
+        print("--warmup-cycles requires --measurement-cycles")
+        sys.exit(1)
+
+    if args.warmup_insts and (args.warmup_cycles or args.measurement_cycles):
+        print("Do not mix instruction-bounded warmup with cycle-window timing")
+        sys.exit(1)
+
+    if args.measurement_cycles:
+        if args.warmup_cycles:
+            run_cycle_phase(args, args.warmup_cycles, "Warmup")
+            m5.stats.reset()
+            m5.stats.outputList.clear()
+            m5.stats.addStatVisitor("stats_final.txt")
+        else:
+            m5.stats.outputList.clear()
+            m5.stats.addStatVisitor("stats_final.txt")
+
+        run_cycle_phase(args, args.measurement_cycles, "Measurement")
+        sys.exit(0)
 
     if args.warmup_insts:
         while True:
@@ -506,6 +550,10 @@ def main():
                         help="Enable per-core branch trace logging")
     parser.add_argument("--data-trace", action="store_true",
                         help="Enable per-core data access trace logging")
+    parser.add_argument("--warmup-cycles", type=int, default=0,
+                        help="Detailed warmup window in CPU cycles")
+    parser.add_argument("--measurement-cycles", type=int, default=0,
+                        help="Measurement window in CPU cycles")
 
     Options.addCommonOptions(parser)
     Ruby.define_options(parser)
