@@ -25,6 +25,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import json
 import math
 import os
 from pathlib import Path
@@ -41,6 +42,7 @@ class L1Cache(RubyCache): pass
 class L2Cache(RubyCache): pass
 
 GEM5_UARCH_SUFFIX = "gem5_uarch"
+RUBY_PROTOCOL_SUBDIR = "mesi_two_level"
 LLC_RESTORE_STAGED = "llc_restore_addrs.txt"
 L2_SHARED_RESTORE_STAGED = "l2_shared_restore_addrs.txt"
 L1D_RESTORE_TEMPLATE = "l1d_restore_addrs.core{core}.txt"
@@ -73,6 +75,27 @@ def discover_gem5_uarch_dir(restore_dir: Path):
     return nested
 
 
+def _legacy_protocol_manifest_matches(gem5_uarch_dir: Path) -> bool:
+    manifest = gem5_uarch_dir / "manifest.json"
+    if not manifest.is_file():
+        return False
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    return payload.get("target_ruby_protocol") == RUBY_PROTOCOL_SUBDIR
+
+
+def discover_protocol_gem5_uarch_dir(restore_dir: Path):
+    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    protocol_dir = gem5_uarch_dir / RUBY_PROTOCOL_SUBDIR
+    if protocol_dir.is_dir():
+        return protocol_dir
+    if _legacy_protocol_manifest_matches(gem5_uarch_dir):
+        return gem5_uarch_dir
+    return protocol_dir
+
+
 def discover_llc_restore_file(options):
     if not getattr(options, "restore_llc_state", False):
         return None
@@ -89,7 +112,7 @@ def discover_llc_restore_file(options):
         return None
 
     restore_dir = Path(options.restore).resolve()
-    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
     target_path = gem5_uarch_dir / LLC_RESTORE_STAGED
 
     if not gem5_uarch_dir.is_dir():
@@ -126,7 +149,7 @@ def discover_l2_shared_restore_file(options):
         )
 
     restore_dir = Path(options.restore).resolve()
-    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
     target_path = gem5_uarch_dir / L2_SHARED_RESTORE_STAGED
 
     if not gem5_uarch_dir.is_dir():
@@ -166,7 +189,7 @@ def discover_l1i_restore_files(options):
         return {}
 
     restore_dir = Path(options.restore).resolve()
-    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
 
     if not gem5_uarch_dir.is_dir():
         m5.util.warn(
@@ -210,7 +233,7 @@ def discover_l1d_restore_files(options):
         return {}
 
     restore_dir = Path(options.restore).resolve()
-    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
 
     if not gem5_uarch_dir.is_dir():
         m5.util.warn(
