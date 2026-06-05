@@ -173,14 +173,6 @@ def discover_l1i_restore_files(options):
     if not getattr(options, "restore_l1i_state", False):
         return {}
 
-    if getattr(options, "num_cpus", 0) != 1:
-        m5.util.warn(
-            "L1I warm restore is currently validated only for single-core "
-            "runs; continuing experimentally in multicore mode without a "
-            "coherence-safe private restore contract. Got %d CPUs."
-            % getattr(options, "num_cpus", 0)
-        )
-
     if not getattr(options, "restore", None):
         m5.util.warn(
             "--restore-l1i-state was set without --restore; "
@@ -216,14 +208,6 @@ def discover_l1i_restore_files(options):
 def discover_l1d_restore_files(options):
     if not getattr(options, "restore_l1d_state", False):
         return {}
-
-    if getattr(options, "num_cpus", 0) != 1:
-        m5.util.warn(
-            "L1D warm restore is currently validated only for single-core "
-            "runs; continuing experimentally in multicore mode without a "
-            "coherence-safe private restore contract. Got %d CPUs."
-            % getattr(options, "num_cpus", 0)
-        )
 
     if not getattr(options, "restore", None):
         m5.util.warn(
