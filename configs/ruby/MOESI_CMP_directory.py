@@ -37,6 +37,7 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+import json
 import math
 from pathlib import Path
 import m5
@@ -58,6 +59,7 @@ class L2Cache(RubyCache):
 
 
 GEM5_UARCH_SUFFIX = "gem5_uarch"
+RUBY_PROTOCOL_SUBDIR = "moesi_cmp_directory"
 LLC_RESTORE_STAGED = "llc_restore_addrs.txt"
 MOESI_PRIVATE_OWNER_RESTORE_STAGED = (
     "moesi_single_private_data_writeable_restore.txt"
@@ -104,6 +106,27 @@ def discover_gem5_uarch_dir(restore_dir: Path):
     return nested
 
 
+def _legacy_protocol_manifest_matches(gem5_uarch_dir: Path) -> bool:
+    manifest = gem5_uarch_dir / "manifest.json"
+    if not manifest.is_file():
+        return False
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    return payload.get("target_ruby_protocol") == RUBY_PROTOCOL_SUBDIR
+
+
+def discover_protocol_gem5_uarch_dir(restore_dir: Path):
+    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    protocol_dir = gem5_uarch_dir / RUBY_PROTOCOL_SUBDIR
+    if protocol_dir.is_dir():
+        return protocol_dir
+    if _legacy_protocol_manifest_matches(gem5_uarch_dir):
+        return gem5_uarch_dir
+    return protocol_dir
+
+
 def discover_llc_restore_file(options):
     if not getattr(options, "restore_llc_state", False):
         return None
@@ -116,7 +139,7 @@ def discover_llc_restore_file(options):
         return None
 
     restore_dir = Path(options.restore).resolve()
-    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
     target_path = gem5_uarch_dir / LLC_RESTORE_STAGED
 
     if not gem5_uarch_dir.is_dir():
@@ -147,7 +170,7 @@ def discover_moesi_private_owner_restore_file(options):
         return None
 
     restore_dir = Path(options.restore).resolve()
-    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
     target_path = gem5_uarch_dir / MOESI_PRIVATE_OWNER_RESTORE_STAGED
 
     if not gem5_uarch_dir.is_dir():
@@ -179,7 +202,7 @@ def discover_moesi_private_clean_restore_file(options):
         return None
 
     restore_dir = Path(options.restore).resolve()
-    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
     target_path = gem5_uarch_dir / MOESI_PRIVATE_CLEAN_RESTORE_STAGED
 
     if not gem5_uarch_dir.is_dir():
@@ -211,7 +234,7 @@ def discover_moesi_multi_private_clean_restore_file(options):
         return None
 
     restore_dir = Path(options.restore).resolve()
-    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
     target_path = gem5_uarch_dir / MOESI_MULTI_PRIVATE_CLEAN_RESTORE_STAGED
 
     if not gem5_uarch_dir.is_dir():
@@ -244,7 +267,7 @@ def discover_moesi_multi_private_clean_nonllc_restore_file(options):
         return None
 
     restore_dir = Path(options.restore).resolve()
-    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
     target_path = (
         gem5_uarch_dir / MOESI_MULTI_PRIVATE_CLEAN_NONLLC_RESTORE_STAGED
     )
@@ -278,7 +301,7 @@ def discover_moesi_private_instruction_only_restore_file(options):
         return None
 
     restore_dir = Path(options.restore).resolve()
-    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
     target_path = (
         gem5_uarch_dir / MOESI_PRIVATE_INSTRUCTION_ONLY_RESTORE_STAGED
     )
@@ -312,7 +335,7 @@ def discover_moesi_private_instruction_only_nonllc_restore_file(options):
         return None
 
     restore_dir = Path(options.restore).resolve()
-    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
     target_path = (
         gem5_uarch_dir / MOESI_PRIVATE_INSTRUCTION_ONLY_NONLLC_RESTORE_STAGED
     )
@@ -346,7 +369,7 @@ def discover_moesi_l1d_restore_files(options):
         return {}
 
     restore_dir = Path(options.restore).resolve()
-    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
 
     if not gem5_uarch_dir.is_dir():
         m5.util.warn(
@@ -384,7 +407,7 @@ def discover_moesi_l1d_multi_clean_restore_files(options):
         return {}
 
     restore_dir = Path(options.restore).resolve()
-    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
 
     if not gem5_uarch_dir.is_dir():
         m5.util.warn(
@@ -423,7 +446,7 @@ def discover_moesi_l1i_instruction_restore_files(options):
         return {}
 
     restore_dir = Path(options.restore).resolve()
-    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
 
     if not gem5_uarch_dir.is_dir():
         m5.util.warn(
@@ -463,7 +486,7 @@ def discover_moesi_l1d_clean_restore_files(options):
         return {}
 
     restore_dir = Path(options.restore).resolve()
-    gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
+    gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
 
     if not gem5_uarch_dir.is_dir():
         m5.util.warn(
