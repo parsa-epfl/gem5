@@ -222,6 +222,9 @@ class CpuCluster(SubSystem):
                 if args.warmup_insts:
                     cpu.max_insts_any_thread += args.warmup_insts
 
+            if args.prog_interval:
+                cpu.progress_interval = args.prog_interval
+
 
             if args.bp_type:
                 bpClass = ObjectList.bp_list.get(args.bp_type)
