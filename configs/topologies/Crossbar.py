@@ -61,7 +61,10 @@ class Crossbar(SimpleTopology):
             int_links.append(IntLink(link_id=(link_count+i),
                                      src_node=routers[i],
                                      dst_node=xbar,
-                                     latency = link_latency))
+                                     latency=link_latency,
+                                     bandwidth_factor=(
+                                         options.simple_int_link_bandwidth
+                                     )))
 
         link_count += len(self.nodes)
 
@@ -69,6 +72,9 @@ class Crossbar(SimpleTopology):
             int_links.append(IntLink(link_id=(link_count+i),
                                      src_node=xbar,
                                      dst_node=routers[i],
-                                     latency = link_latency))
+                                     latency=link_latency,
+                                     bandwidth_factor=(
+                                         options.simple_int_link_bandwidth
+                                     )))
 
         network.int_links = int_links

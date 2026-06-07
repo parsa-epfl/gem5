@@ -106,6 +106,14 @@ structure(RequestMsg, desc="...", interface="Message") {
   MessageSizeType MessageSize, desc="size category of the message";
   RubyAccessMode AccessMode,    desc="user/supervisor access type";
   PrefetchBit Prefetch,         desc="Is this a prefetch request";
+  Cycles InitialRequestTime, default="Cycles(0)",
+      desc="time the request was first issued from the requester L1";
+  Cycles RequestEnqueueTime, default="Cycles(0)",
+      desc="time the request became visible in the requester output buffer";
+  Cycles RequestArrivalTime, default="Cycles(0)",
+      desc="time the request arrived in the responder input buffer";
+  Cycles ForwardRequestTime, default="Cycles(0)",
+      desc="time the request was forwarded beyond the initial requester";
 
   bool functionalRead(Packet *pkt) {
     // Read only those messages that contain the data
@@ -133,6 +141,20 @@ structure(ResponseMsg, desc="...", interface="Message") {
   bool Dirty,                  desc="Is the data dirty (different than memory)?";
   int Acks,                    desc="How many acks to expect";
   MessageSizeType MessageSize, desc="size category of the message";
+  Cycles InitialRequestTime, default="Cycles(0)",
+      desc="time the request was first issued from the requester L1";
+  Cycles RequestEnqueueTime, default="Cycles(0)",
+      desc="time the request became visible in the requester output buffer";
+  Cycles RequestArrivalTime, default="Cycles(0)",
+      desc="time the request arrived in the responder input buffer";
+  Cycles ForwardRequestTime, default="Cycles(0)",
+      desc="time the request was forwarded beyond the initial requester";
+  Cycles FirstResponseTime, default="Cycles(0)",
+      desc="time the first data response was generated";
+  Cycles ResponderDequeueTime, default="Cycles(0)",
+      desc="time the responding controller dequeued the request";
+  Cycles ResponseEnqueueTime, default="Cycles(0)",
+      desc="time the responding controller enqueued the response";
 
   bool functionalRead(Packet *pkt) {
     // Read only those messages that contain the data

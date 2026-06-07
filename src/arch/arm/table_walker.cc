@@ -48,6 +48,7 @@
 #include "cpu/thread_context.hh"
 #include "debug/Checkpoint.hh"
 #include "debug/Drain.hh"
+#include "debug/LoadLifecycle.hh"
 #include "debug/PageTableWalker.hh"
 #include "debug/TLB.hh"
 #include "debug/TLBVerbose.hh"
@@ -1674,6 +1675,33 @@ TableWalker::memAttrsAArch64(ThreadContext *tc, TlbEntry &te,
             (1 << 11) |     // LPAE bit
             (te.ns << 9) |  // NS bit
             (sh << 7);
+
+        if (currState && currState->vaddr >= 0x490000 &&
+            currState->vaddr < 0x4d0000) {
+            const auto ttbr0 = currState->tc->readMiscReg(MISCREG_TTBR0_EL1);
+            const auto ttbr1 = currState->tc->readMiscReg(MISCREG_TTBR1_EL1);
+            DPRINTF(LoadLifecycle,
+                    "stage1_attr vaddr=%#x raw_desc=%#llx attrIndx=%u "
+                    "mair=%#llx attr=%#x attr_hi=%#x attr_lo=%#x "
+                    "mtype=%u noncacheable=%d "
+                    "shareable=%d outerShareable=%d isStage2=%d asid=%u "
+                    "ttbr0=%#llx ttbr1=%#llx tcr=%#llx sctlr=%#llx\n",
+                    currState->vaddr,
+                    static_cast<unsigned long long>(lDescriptor.getRawData()),
+                    static_cast<unsigned>(attrIndx),
+                    static_cast<unsigned long long>(mair),
+                    static_cast<unsigned>(attr),
+                    static_cast<unsigned>(attr_hi),
+                    static_cast<unsigned>(attr_lo),
+                    static_cast<unsigned>(te.mtype),
+                    te.nonCacheable, te.shareable,
+                    te.outerShareable, isStage2,
+                    static_cast<unsigned>(currState->asid),
+                    static_cast<unsigned long long>(ttbr0),
+                    static_cast<unsigned long long>(ttbr1),
+                    static_cast<unsigned long long>(currState->tcr),
+                    static_cast<unsigned long long>(currState->sctlr));
+        }
     }
 }
 

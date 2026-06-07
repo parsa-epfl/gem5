@@ -60,6 +60,7 @@ if 'O3CPU' in env['CPU_MODELS']:
     DebugFlag('IEW')
     DebugFlag('IQ')
     DebugFlag('LSQ')
+    DebugFlag('LoadLifecycle')
     DebugFlag('LSQUnit')
     DebugFlag('MemDepUnit')
     DebugFlag('O3CPU')

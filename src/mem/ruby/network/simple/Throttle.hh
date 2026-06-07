@@ -122,6 +122,12 @@ class Throttle : public Consumer
         statistics::Scalar m_link_utilization;
         statistics::Vector* m_msg_counts[MessageSizeType_NUM];
         statistics::Formula* m_msg_bytes[MessageSizeType_NUM];
+        statistics::Vector* m_input_queue_wait_total;
+        statistics::Vector* m_input_queue_wait_samples;
+        statistics::Formula* m_input_queue_wait_mean;
+        statistics::Vector* m_input_queue_wait_total_by_type;
+        statistics::Vector* m_input_queue_wait_samples_by_type;
+        statistics::Formula* m_input_queue_wait_mean_by_type;
     } throttleStats;
 };
 

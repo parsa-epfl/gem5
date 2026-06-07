@@ -53,6 +53,7 @@
 #include "debug/HtmCpu.hh"
 #include "debug/IEW.hh"
 #include "debug/LSQUnit.hh"
+#include "debug/LoadLifecycle.hh"
 #include "debug/O3PipeView.hh"
 #include "mem/packet.hh"
 #include "mem/request.hh"
@@ -732,8 +733,15 @@ LSQUnit::commitLoad()
     if (!inst->isInstPrefetch() && !inst->isDataPrefetch()
             && inst->firstIssue != -1
             && inst->lastWakeDependents != -1) {
-        stats.loadToUse.sample(cpu->ticksToCycles(
-                    inst->lastWakeDependents - inst->firstIssue));
+        const Cycles loadToUse = cpu->ticksToCycles(
+                inst->lastWakeDependents - inst->firstIssue);
+        stats.loadToUse.sample(loadToUse);
+        DPRINTF(LoadLifecycle,
+                "commit cpu=%u sn=%lli pc=%s first_issue=%llu "
+                "last_wake=%llu load_to_use_cycles=%llu\n",
+                lsqID, inst->seqNum, inst->pcState(), inst->firstIssue,
+                inst->lastWakeDependents,
+                static_cast<unsigned long long>(loadToUse));
     }
 
     loadQueue.front().clear();
@@ -946,6 +954,11 @@ LSQUnit::squash(const InstSeqNum &squashed_num)
                 "[sn:%lli]\n",
                 loadQueue.back().instruction()->pcState(),
                 loadQueue.back().instruction()->seqNum);
+        DPRINTF(LoadLifecycle,
+                "squash cpu=%u sn=%lli pc=%s first_issue=%llu now=%llu\n",
+                lsqID, loadQueue.back().instruction()->seqNum,
+                loadQueue.back().instruction()->pcState(),
+                loadQueue.back().instruction()->firstIssue, curTick());
 
         if (isStalled() && loadQueue.tail() == stallingLoadIdx) {
             stalled = false;
@@ -1075,6 +1088,7 @@ LSQUnit::storePostSend()
         // The store is basically completed at this time. This
         // only works so long as the checker doesn't try to
         // verify the value in memory for stores.
+        storeWBIt->instruction()->memCompleteTick = curTick();
         storeWBIt->instruction()->setCompleted();
 
         if (cpu->checker) {
@@ -1142,6 +1156,24 @@ LSQUnit::writeback(const DynInstPtr &inst, PacketPtr pkt)
         }
     }
 
+    if (inst->isLoad()) {
+        inst->memCompleteTick = curTick();
+        const RequestPtr& req = pkt ? pkt->req : nullptr;
+        const Tick serviceTicks =
+            inst->firstIssue != static_cast<Tick>(-1) ?
+                curTick() - inst->firstIssue : 0;
+        DPRINTF(LoadLifecycle,
+                "writeback cpu=%u sn=%lli pc=%s paddr=%#x vaddr=%#x "
+                "first_issue=%llu now=%llu service_cycles=%llu "
+                "fault=%d squashed=%d\n",
+                lsqID, inst->seqNum, inst->pcState(),
+                req && req->hasPaddr() ? req->getPaddr() : 0,
+                req ? req->getVaddr() : 0, inst->firstIssue, curTick(),
+                static_cast<unsigned long long>(
+                    cpu->ticksToCycles(serviceTicks)),
+                inst->fault != NoFault, inst->isSquashed());
+    }
+
     // Need to insert instruction into queue to commit
     iewStage->instToCommit(inst);
 
@@ -1199,6 +1231,7 @@ LSQUnit::completeStore(typename StoreQueue::iterator store_idx)
     }
 
     store_inst->setCompleted();
+    store_inst->memCompleteTick = curTick();
 
     if (needsTSO) {
         storeInFlight = false;
@@ -1327,6 +1360,14 @@ LSQUnit::read(LSQRequest *req, int load_idx)
         ++stats.rescheduledLoads;
         DPRINTF(LSQUnit, "Strictly ordered load [sn:%lli] PC %s\n",
                 load_inst->seqNum, load_inst->pcState());
+        DPRINTF(LoadLifecycle,
+                "reschedule cpu=%u sn=%lli pc=%s reason=strictly_ordered "
+                "paddr=%#x vaddr=%#x first_issue=%llu now=%llu\n",
+                lsqID, load_inst->seqNum, load_inst->pcState(),
+                req->mainRequest()->hasPaddr() ?
+                    req->mainRequest()->getPaddr() : 0,
+                req->mainRequest()->getVaddr(), load_inst->firstIssue,
+                curTick());
 
         // Must delete request now that it wasn't handed off to
         // memory.  This is quite ugly.  @todo: Figure out the proper
@@ -1574,6 +1615,17 @@ LSQUnit::read(LSQRequest *req, int load_idx)
                 DPRINTF(LSQUnit, "Load-store forwarding mis-match. "
                         "Store idx %i to load addr %#x\n",
                         store_it._idx, req->mainRequest()->getVaddr());
+                DPRINTF(LoadLifecycle,
+                        "reschedule cpu=%u sn=%lli pc=%s "
+                        "reason=forwarding_mismatch store_sn=%lli "
+                        "store_idx=%i paddr=%#x vaddr=%#x first_issue=%llu "
+                        "now=%llu\n",
+                        lsqID, load_inst->seqNum, load_inst->pcState(),
+                        store_it->instruction()->seqNum, store_it._idx,
+                        req->mainRequest()->hasPaddr() ?
+                            req->mainRequest()->getPaddr() : 0,
+                        req->mainRequest()->getVaddr(), load_inst->firstIssue,
+                        curTick());
 
                 // Must discard the request.
                 req->discard();
@@ -1618,8 +1670,27 @@ LSQUnit::read(LSQRequest *req, int load_idx)
     }
     req->buildPackets();
     req->sendPacketToCache();
-    if (!req->isSent())
+    if (req->isSent()) {
+        DPRINTF(LoadLifecycle,
+                "send cpu=%u sn=%lli pc=%s paddr=%#x vaddr=%#x size=%u "
+                "first_issue=%llu now=%llu split=%d\n",
+                lsqID, load_inst->seqNum, load_inst->pcState(),
+                req->mainRequest()->hasPaddr() ?
+                    req->mainRequest()->getPaddr() : 0,
+                req->mainRequest()->getVaddr(),
+                req->mainRequest()->getSize(),
+                load_inst->firstIssue, curTick(), req->isSplit());
+    } else {
+        DPRINTF(LoadLifecycle,
+                "blocked cpu=%u sn=%lli pc=%s paddr=%#x vaddr=%#x "
+                "first_issue=%llu now=%llu split=%d\n",
+                lsqID, load_inst->seqNum, load_inst->pcState(),
+                req->mainRequest()->hasPaddr() ?
+                    req->mainRequest()->getPaddr() : 0,
+                req->mainRequest()->getVaddr(), load_inst->firstIssue,
+                curTick(), req->isSplit());
         iewStage->blockMemInst(load_inst);
+    }
 
     return NoFault;
 }

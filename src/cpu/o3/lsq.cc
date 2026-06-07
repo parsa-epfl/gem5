@@ -55,6 +55,7 @@
 #include "debug/Fetch.hh"
 #include "debug/HtmCpu.hh"
 #include "debug/LSQ.hh"
+#include "debug/LoadLifecycle.hh"
 #include "debug/Writeback.hh"
 #include "params/O3CPU.hh"
 
@@ -870,6 +871,17 @@ LSQ::SingleDataRequest::finish(const Fault &fault, const RequestPtr &req,
         squashTranslation();
     } else {
         _inst->strictlyOrdered(req->isStrictlyOrdered());
+        DPRINTF(LoadLifecycle,
+                "translate_finish cpu=%u sn=%lli pc=%s split=0 "
+                "vaddr=%#x paddr=%#x fault=%d flags=%#llx strict=%d "
+                "uncacheable=%d priv=%d secure=%d ptwalk=%d kernel=%d\n",
+                _inst->cpuId(), _inst->seqNum, _inst->pcState(),
+                req->getVaddr(), req->hasPaddr() ? req->getPaddr() : 0,
+                fault != NoFault,
+                static_cast<unsigned long long>(req->getFlags()),
+                req->isStrictlyOrdered(), req->isUncacheable(),
+                req->isPriv(), req->isSecure(), req->isPTWalk(),
+                req->isKernel());
 
         flags.set(Flag::TranslationFinished);
         if (fault == NoFault) {
@@ -909,6 +921,18 @@ LSQ::SplitDataRequest::finish(const Fault &fault, const RequestPtr &req,
             squashTranslation();
         } else {
             _inst->strictlyOrdered(mainReq->isStrictlyOrdered());
+            DPRINTF(LoadLifecycle,
+                    "translate_finish cpu=%u sn=%lli pc=%s split=1 "
+                    "vaddr=%#x paddr=%#x fault=%d flags=%#llx strict=%d "
+                    "uncacheable=%d priv=%d secure=%d ptwalk=%d kernel=%d\n",
+                    _inst->cpuId(), _inst->seqNum, _inst->pcState(),
+                    mainReq->getVaddr(),
+                    mainReq->hasPaddr() ? mainReq->getPaddr() : 0,
+                    _inst->fault != NoFault,
+                    static_cast<unsigned long long>(mainReq->getFlags()),
+                    mainReq->isStrictlyOrdered(), mainReq->isUncacheable(),
+                    mainReq->isPriv(), mainReq->isSecure(),
+                    mainReq->isPTWalk(), mainReq->isKernel());
             flags.set(Flag::TranslationFinished);
             _inst->translationCompleted(true);
 

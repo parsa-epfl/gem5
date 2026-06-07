@@ -119,6 +119,11 @@ class MessageBuffer : public SimObject
     const Message* peek() const;
 
     const MsgPtr &peekMsgPtr() const { return m_prio_heap.front(); }
+    Tick
+    getHeadEnqueueTime() const
+    {
+        return m_prio_heap.front()->getLastEnqueueTime();
+    }
 
     void enqueue(MsgPtr message, Tick curTime, Tick delta);
 

@@ -46,6 +46,7 @@
 #include <ostream>
 #include <unordered_map>
 
+#include "base/statistics.hh"
 #include "mem/ruby/common/Address.hh"
 #include "mem/ruby/protocol/MachineType.hh"
 #include "mem/ruby/protocol/RubyRequestType.hh"
@@ -68,8 +69,8 @@ struct SequencerRequest
     Cycles issue_time;
     SequencerRequest(PacketPtr _pkt, RubyRequestType _m_type,
                      RubyRequestType _m_second_type, Cycles _issue_time)
-                : pkt(_pkt), m_type(_m_type), m_second_type(_m_second_type),
-                  issue_time(_issue_time)
+        : pkt(_pkt), m_type(_m_type), m_second_type(_m_second_type),
+          issue_time(_issue_time)
     {}
 
     bool functionalWrite(Packet *func_pkt) const
@@ -108,15 +109,21 @@ class Sequencer : public RubyPort
                        const bool externalHit = false,
                        const MachineType mach = MachineType_NUM,
                        const Cycles initialRequestTime = Cycles(0),
+                       const Cycles requestEnqueueTime = Cycles(0),
                        const Cycles forwardRequestTime = Cycles(0),
                        const Cycles firstResponseTime = Cycles(0),
+                       const Cycles requestArrivalTime = Cycles(0),
+                       const Cycles responderDequeueTime = Cycles(0),
+                       const Cycles responseEnqueueTime = Cycles(0),
+                       const Cycles responseDequeueTime = Cycles(0),
                        const bool noCoales = false);
 
     // Write callback that prevents coalescing
     void writeUniqueCallback(Addr address, DataBlock& data)
     {
         writeCallback(address, data, true, MachineType_NUM, Cycles(0),
-                      Cycles(0), Cycles(0), true);
+                      Cycles(0), Cycles(0), Cycles(0), Cycles(0),
+                      Cycles(0), Cycles(0), Cycles(0), true);
     }
 
     void readCallback(Addr address,
@@ -124,8 +131,13 @@ class Sequencer : public RubyPort
                       const bool externalHit = false,
                       const MachineType mach = MachineType_NUM,
                       const Cycles initialRequestTime = Cycles(0),
+                      const Cycles requestEnqueueTime = Cycles(0),
                       const Cycles forwardRequestTime = Cycles(0),
-                      const Cycles firstResponseTime = Cycles(0));
+                      const Cycles firstResponseTime = Cycles(0),
+                      const Cycles requestArrivalTime = Cycles(0),
+                      const Cycles responderDequeueTime = Cycles(0),
+                      const Cycles responseEnqueueTime = Cycles(0),
+                      const Cycles responseDequeueTime = Cycles(0));
 
     RequestStatus makeRequest(PacketPtr pkt) override;
     virtual bool empty() const;
@@ -202,15 +214,25 @@ class Sequencer : public RubyPort
                      bool llscSuccess,
                      const MachineType mach, const bool externalHit,
                      const Cycles initialRequestTime,
+                     const Cycles requestEnqueueTime,
                      const Cycles forwardRequestTime,
                      const Cycles firstResponseTime,
+                     const Cycles requestArrivalTime,
+                     const Cycles responderDequeueTime,
+                     const Cycles responseEnqueueTime,
+                     const Cycles responseDequeueTime,
                      const bool was_coalesced);
 
     void recordMissLatency(SequencerRequest* srequest, bool llscSuccess,
                            const MachineType respondingMach,
                            bool isExternalHit, Cycles initialRequestTime,
+                           Cycles requestEnqueueTime,
                            Cycles forwardRequestTime,
-                           Cycles firstResponseTime);
+                           Cycles firstResponseTime,
+                           Cycles requestArrivalTime,
+                           Cycles responderDequeueTime,
+                           Cycles responseEnqueueTime,
+                           Cycles responseDequeueTime);
 
     // Private copy constructor and assignment operator
     Sequencer(const Sequencer& obj);
@@ -282,6 +304,47 @@ class Sequencer : public RubyPort
     std::vector<statistics::Histogram *> m_ForwardToFirstResponseDelayHist;
     std::vector<statistics::Histogram *> m_FirstResponseToCompletionDelayHist;
     std::vector<statistics::Counter> m_IncompleteTimes;
+
+    statistics::Scalar m_phaseSamples;
+    statistics::Scalar m_issueToInitialTotal;
+    statistics::Scalar m_initialToForwardTotal;
+    statistics::Scalar m_forwardToFirstResponseTotal;
+    statistics::Scalar m_firstResponseToCompletionTotal;
+    statistics::Formula m_issueToInitialMean;
+    statistics::Formula m_initialToForwardMean;
+    statistics::Formula m_forwardToFirstResponseMean;
+    statistics::Formula m_firstResponseToCompletionMean;
+
+    std::vector<statistics::Histogram *> m_IssueToResponderDequeueDelayHist;
+    std::vector<statistics::Histogram *> m_InitialToRequestEnqueueDelayHist;
+    std::vector<statistics::Histogram *> m_RequestEnqueueToArrivalDelayHist;
+    std::vector<statistics::Histogram *> m_IssueToRequestArrivalDelayHist;
+    std::vector<statistics::Histogram *>
+        m_RequestArrivalToResponderDequeueDelayHist;
+    std::vector<statistics::Histogram *>
+        m_ResponderDequeueToResponseEnqueueDelayHist;
+    std::vector<statistics::Histogram *>
+        m_ResponseEnqueueToDequeueDelayHist;
+    std::vector<statistics::Histogram *>
+        m_ResponseDequeueToCompletionDelayHist;
+
+    statistics::Scalar m_transportPhaseSamples;
+    statistics::Scalar m_issueToResponderDequeueTotal;
+    statistics::Scalar m_initialToRequestEnqueueTotal;
+    statistics::Scalar m_requestEnqueueToArrivalTotal;
+    statistics::Scalar m_issueToRequestArrivalTotal;
+    statistics::Scalar m_requestArrivalToResponderDequeueTotal;
+    statistics::Scalar m_responderDequeueToResponseEnqueueTotal;
+    statistics::Scalar m_responseEnqueueToDequeueTotal;
+    statistics::Scalar m_responseDequeueToCompletionTotal;
+    statistics::Formula m_issueToResponderDequeueMean;
+    statistics::Formula m_initialToRequestEnqueueMean;
+    statistics::Formula m_requestEnqueueToArrivalMean;
+    statistics::Formula m_issueToRequestArrivalMean;
+    statistics::Formula m_requestArrivalToResponderDequeueMean;
+    statistics::Formula m_responderDequeueToResponseEnqueueMean;
+    statistics::Formula m_responseEnqueueToDequeueMean;
+    statistics::Formula m_responseDequeueToCompletionMean;
 
     EventFunctionWrapper deadlockCheckEvent;
 

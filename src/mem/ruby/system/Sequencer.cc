@@ -70,6 +70,32 @@ Sequencer::Sequencer(const Params &p)
     : RubyPort(p), m_dataTraceEnable(p.data_trace_enable),
       m_dataTraceStream(nullptr),
       m_IncompleteTimes(MachineType_NUM),
+      m_phaseSamples(this),
+      m_issueToInitialTotal(this),
+      m_initialToForwardTotal(this),
+      m_forwardToFirstResponseTotal(this),
+      m_firstResponseToCompletionTotal(this),
+      m_issueToInitialMean(this),
+      m_initialToForwardMean(this),
+      m_forwardToFirstResponseMean(this),
+      m_firstResponseToCompletionMean(this),
+      m_transportPhaseSamples(this),
+      m_issueToResponderDequeueTotal(this),
+      m_initialToRequestEnqueueTotal(this),
+      m_requestEnqueueToArrivalTotal(this),
+      m_issueToRequestArrivalTotal(this),
+      m_requestArrivalToResponderDequeueTotal(this),
+      m_responderDequeueToResponseEnqueueTotal(this),
+      m_responseEnqueueToDequeueTotal(this),
+      m_responseDequeueToCompletionTotal(this),
+      m_issueToResponderDequeueMean(this),
+      m_initialToRequestEnqueueMean(this),
+      m_requestEnqueueToArrivalMean(this),
+      m_issueToRequestArrivalMean(this),
+      m_requestArrivalToResponderDequeueMean(this),
+      m_responderDequeueToResponseEnqueueMean(this),
+      m_responseEnqueueToDequeueMean(this),
+      m_responseDequeueToCompletionMean(this),
       deadlockCheckEvent([this]{ wakeup(); }, "Sequencer deadlock check")
 {
     m_outstanding_count = 0;
@@ -89,6 +115,174 @@ Sequencer::Sequencer(const Params &p)
             "data_trace_core_%d.log", m_version);
         m_dataTraceStream = simout.findOrCreate(fname)->stream();
     }
+
+    m_phaseSamples
+        .name(name() + ".phase_samples")
+        .desc("Number of Ruby miss requests with complete phase timing")
+        .flags(statistics::nozero);
+    m_issueToInitialTotal
+        .name(name() + ".issue_to_initial_total")
+        .desc("Total cycles from issue to initial request for Ruby misses")
+        .flags(statistics::nozero);
+    m_initialToForwardTotal
+        .name(name() + ".initial_to_forward_total")
+        .desc("Total cycles from initial request to forward for Ruby misses")
+        .flags(statistics::nozero);
+    m_forwardToFirstResponseTotal
+        .name(name() + ".forward_to_first_response_total")
+        .desc("Total cycles from forward to first response for Ruby misses")
+        .flags(statistics::nozero);
+    m_firstResponseToCompletionTotal
+        .name(name() + ".first_response_to_completion_total")
+        .desc("Total cycles from first response to completion for Ruby misses")
+        .flags(statistics::nozero);
+
+    m_issueToInitialMean
+        .name(name() + ".issue_to_initial_mean")
+        .desc("Mean cycles from issue to initial request for Ruby misses")
+        .flags(statistics::nozero);
+    m_issueToInitialMean = m_issueToInitialTotal / m_phaseSamples;
+
+    m_initialToForwardMean
+        .name(name() + ".initial_to_forward_mean")
+        .desc("Mean cycles from initial request to forward for Ruby misses")
+        .flags(statistics::nozero);
+    m_initialToForwardMean = m_initialToForwardTotal / m_phaseSamples;
+
+    m_forwardToFirstResponseMean
+        .name(name() + ".forward_to_first_response_mean")
+        .desc("Mean cycles from forward to first response for Ruby misses")
+        .flags(statistics::nozero);
+    m_forwardToFirstResponseMean =
+        m_forwardToFirstResponseTotal / m_phaseSamples;
+
+    m_firstResponseToCompletionMean
+        .name(name() + ".first_response_to_completion_mean")
+        .desc("Mean cycles from first response to completion for Ruby misses")
+        .flags(statistics::nozero);
+    m_firstResponseToCompletionMean =
+        m_firstResponseToCompletionTotal / m_phaseSamples;
+
+    m_transportPhaseSamples
+        .name(name() + ".transport_phase_samples")
+        .desc("Number of Ruby miss requests with complete transport timing")
+        .flags(statistics::nozero);
+    m_issueToResponderDequeueTotal
+        .name(name() + ".issue_to_responder_dequeue_total")
+        .desc("Total cycles from issue to responder dequeue for Ruby misses")
+        .flags(statistics::nozero);
+    m_initialToRequestEnqueueTotal
+        .name(name() + ".initial_to_request_enqueue_total")
+        .desc(
+            "Total cycles from initial requester handling to requester "
+            "output-buffer visibility for Ruby misses")
+        .flags(statistics::nozero);
+    m_requestEnqueueToArrivalTotal
+        .name(name() + ".request_enqueue_to_arrival_total")
+        .desc(
+            "Total cycles from requester output-buffer visibility to "
+            "responder input-buffer arrival for Ruby misses")
+        .flags(statistics::nozero);
+    m_issueToRequestArrivalTotal
+        .name(name() + ".issue_to_request_arrival_total")
+        .desc(
+            "Total cycles from issue to responder input-buffer arrival "
+            "for Ruby misses")
+        .flags(statistics::nozero);
+    m_requestArrivalToResponderDequeueTotal
+        .name(name() + ".request_arrival_to_responder_dequeue_total")
+        .desc(
+            "Total cycles from responder input-buffer arrival to "
+            "responder dequeue for Ruby misses")
+        .flags(statistics::nozero);
+    m_responderDequeueToResponseEnqueueTotal
+        .name(name() + ".responder_dequeue_to_response_enqueue_total")
+        .desc(
+            "Total cycles from responder dequeue to response enqueue "
+            "for Ruby misses")
+        .flags(statistics::nozero);
+    m_responseEnqueueToDequeueTotal
+        .name(name() + ".response_enqueue_to_dequeue_total")
+        .desc(
+            "Total cycles from response enqueue to requester dequeue "
+            "for Ruby misses")
+        .flags(statistics::nozero);
+    m_responseDequeueToCompletionTotal
+        .name(name() + ".response_dequeue_to_completion_total")
+        .desc(
+            "Total cycles from requester dequeue to completion for Ruby "
+            "misses")
+        .flags(statistics::nozero);
+
+    m_issueToResponderDequeueMean
+        .name(name() + ".issue_to_responder_dequeue_mean")
+        .desc("Mean cycles from issue to responder dequeue for Ruby misses")
+        .flags(statistics::nozero);
+    m_issueToResponderDequeueMean =
+        m_issueToResponderDequeueTotal / m_transportPhaseSamples;
+
+    m_initialToRequestEnqueueMean
+        .name(name() + ".initial_to_request_enqueue_mean")
+        .desc(
+            "Mean cycles from initial requester handling to requester "
+            "output-buffer visibility for Ruby misses")
+        .flags(statistics::nozero);
+    m_initialToRequestEnqueueMean =
+        m_initialToRequestEnqueueTotal / m_transportPhaseSamples;
+
+    m_requestEnqueueToArrivalMean
+        .name(name() + ".request_enqueue_to_arrival_mean")
+        .desc(
+            "Mean cycles from requester output-buffer visibility to "
+            "responder input-buffer arrival for Ruby misses")
+        .flags(statistics::nozero);
+    m_requestEnqueueToArrivalMean =
+        m_requestEnqueueToArrivalTotal / m_transportPhaseSamples;
+
+    m_issueToRequestArrivalMean
+        .name(name() + ".issue_to_request_arrival_mean")
+        .desc(
+            "Mean cycles from issue to responder input-buffer arrival "
+            "for Ruby misses")
+        .flags(statistics::nozero);
+    m_issueToRequestArrivalMean =
+        m_issueToRequestArrivalTotal / m_transportPhaseSamples;
+
+    m_requestArrivalToResponderDequeueMean
+        .name(name() + ".request_arrival_to_responder_dequeue_mean")
+        .desc(
+            "Mean cycles from responder input-buffer arrival to "
+            "responder dequeue for Ruby misses")
+        .flags(statistics::nozero);
+    m_requestArrivalToResponderDequeueMean =
+        m_requestArrivalToResponderDequeueTotal / m_transportPhaseSamples;
+
+    m_responderDequeueToResponseEnqueueMean
+        .name(name() + ".responder_dequeue_to_response_enqueue_mean")
+        .desc(
+            "Mean cycles from responder dequeue to response enqueue "
+            "for Ruby misses")
+        .flags(statistics::nozero);
+    m_responderDequeueToResponseEnqueueMean =
+        m_responderDequeueToResponseEnqueueTotal / m_transportPhaseSamples;
+
+    m_responseEnqueueToDequeueMean
+        .name(name() + ".response_enqueue_to_dequeue_mean")
+        .desc(
+            "Mean cycles from response enqueue to requester dequeue "
+            "for Ruby misses")
+        .flags(statistics::nozero);
+    m_responseEnqueueToDequeueMean =
+        m_responseEnqueueToDequeueTotal / m_transportPhaseSamples;
+
+    m_responseDequeueToCompletionMean
+        .name(name() + ".response_dequeue_to_completion_mean")
+        .desc(
+            "Mean cycles from requester dequeue to completion for Ruby "
+            "misses")
+        .flags(statistics::nozero);
+    m_responseDequeueToCompletionMean =
+        m_responseDequeueToCompletionTotal / m_transportPhaseSamples;
 
 
     // These statistical variables are not for display.
@@ -130,6 +324,38 @@ Sequencer::Sequencer(const Params &p)
         m_FirstResponseToCompletionDelayHist.push_back(
             new statistics::Histogram());
         m_FirstResponseToCompletionDelayHist[i]->init(10);
+
+        m_IssueToResponderDequeueDelayHist.push_back(
+            new statistics::Histogram());
+        m_IssueToResponderDequeueDelayHist[i]->init(10);
+
+        m_InitialToRequestEnqueueDelayHist.push_back(
+            new statistics::Histogram());
+        m_InitialToRequestEnqueueDelayHist[i]->init(10);
+
+        m_RequestEnqueueToArrivalDelayHist.push_back(
+            new statistics::Histogram());
+        m_RequestEnqueueToArrivalDelayHist[i]->init(10);
+
+        m_IssueToRequestArrivalDelayHist.push_back(
+            new statistics::Histogram());
+        m_IssueToRequestArrivalDelayHist[i]->init(10);
+
+        m_RequestArrivalToResponderDequeueDelayHist.push_back(
+            new statistics::Histogram());
+        m_RequestArrivalToResponderDequeueDelayHist[i]->init(10);
+
+        m_ResponderDequeueToResponseEnqueueDelayHist.push_back(
+            new statistics::Histogram());
+        m_ResponderDequeueToResponseEnqueueDelayHist[i]->init(10);
+
+        m_ResponseEnqueueToDequeueDelayHist.push_back(
+            new statistics::Histogram());
+        m_ResponseEnqueueToDequeueDelayHist[i]->init(10);
+
+        m_ResponseDequeueToCompletionDelayHist.push_back(
+            new statistics::Histogram());
+        m_ResponseDequeueToCompletionDelayHist[i]->init(10);
     }
 
     for (int i = 0; i < RubyRequestType_NUM; i++) {
@@ -337,6 +563,12 @@ void Sequencer::resetStats()
 
         m_IncompleteTimes[i] = 0;
     }
+
+    m_phaseSamples = 0;
+    m_issueToInitialTotal = 0;
+    m_initialToForwardTotal = 0;
+    m_forwardToFirstResponseTotal = 0;
+    m_firstResponseToCompletionTotal = 0;
 }
 
 // Insert the request in the request table. Return RequestStatus_Aliased
@@ -378,8 +610,13 @@ void
 Sequencer::recordMissLatency(SequencerRequest* srequest, bool llscSuccess,
                              const MachineType respondingMach,
                              bool isExternalHit, Cycles initialRequestTime,
+                             Cycles requestEnqueueTime,
                              Cycles forwardRequestTime,
-                             Cycles firstResponseTime)
+                             Cycles firstResponseTime,
+                             Cycles requestArrivalTime,
+                             Cycles responderDequeueTime,
+                             Cycles responseEnqueueTime,
+                             Cycles responseDequeueTime)
 {
     RubyRequestType type = srequest->m_type;
     Cycles issued_time = srequest->issue_time;
@@ -416,6 +653,15 @@ Sequencer::recordMissLatency(SequencerRequest* srequest, bool llscSuccess,
                 (initialRequestTime <= forwardRequestTime) &&
                 (forwardRequestTime <= firstResponseTime) &&
                 (firstResponseTime <= completion_time)) {
+                m_phaseSamples++;
+                m_issueToInitialTotal +=
+                    (initialRequestTime - issued_time);
+                m_initialToForwardTotal +=
+                    (forwardRequestTime - initialRequestTime);
+                m_forwardToFirstResponseTotal +=
+                    (firstResponseTime - forwardRequestTime);
+                m_firstResponseToCompletionTotal +=
+                    (completion_time - firstResponseTime);
 
                 m_IssueToInitialDelayHist[respondingMach]->sample(
                     initialRequestTime - issued_time);
@@ -427,6 +673,52 @@ Sequencer::recordMissLatency(SequencerRequest* srequest, bool llscSuccess,
                     completion_time - firstResponseTime);
             } else {
                 m_IncompleteTimes[respondingMach]++;
+            }
+
+            if ((issued_time <= initialRequestTime) &&
+                (initialRequestTime <= requestEnqueueTime) &&
+                (requestEnqueueTime <= requestArrivalTime) &&
+                (requestArrivalTime <= responderDequeueTime) &&
+                (responderDequeueTime <= responseEnqueueTime) &&
+                (responseEnqueueTime <= responseDequeueTime) &&
+                (responseDequeueTime <= completion_time)) {
+                m_transportPhaseSamples++;
+                m_issueToResponderDequeueTotal +=
+                    (responderDequeueTime - issued_time);
+                m_initialToRequestEnqueueTotal +=
+                    (requestEnqueueTime - initialRequestTime);
+                m_requestEnqueueToArrivalTotal +=
+                    (requestArrivalTime - requestEnqueueTime);
+                m_issueToRequestArrivalTotal +=
+                    (requestArrivalTime - issued_time);
+                m_requestArrivalToResponderDequeueTotal +=
+                    (responderDequeueTime - requestArrivalTime);
+                m_responderDequeueToResponseEnqueueTotal +=
+                    (responseEnqueueTime - responderDequeueTime);
+                m_responseEnqueueToDequeueTotal +=
+                    (responseDequeueTime - responseEnqueueTime);
+                m_responseDequeueToCompletionTotal +=
+                    (completion_time - responseDequeueTime);
+
+                m_IssueToResponderDequeueDelayHist[respondingMach]->sample(
+                    responderDequeueTime - issued_time);
+                m_InitialToRequestEnqueueDelayHist[respondingMach]->sample(
+                    requestEnqueueTime - initialRequestTime);
+                m_RequestEnqueueToArrivalDelayHist[respondingMach]->sample(
+                    requestArrivalTime - requestEnqueueTime);
+                m_IssueToRequestArrivalDelayHist[respondingMach]->sample(
+                    requestArrivalTime - issued_time);
+                m_RequestArrivalToResponderDequeueDelayHist[
+                    respondingMach]->sample(
+                        responderDequeueTime - requestArrivalTime);
+                m_ResponderDequeueToResponseEnqueueDelayHist[
+                    respondingMach]->sample(
+                        responseEnqueueTime - responderDequeueTime);
+                m_ResponseEnqueueToDequeueDelayHist[respondingMach]->sample(
+                    responseDequeueTime - responseEnqueueTime);
+                m_ResponseDequeueToCompletionDelayHist[
+                    respondingMach]->sample(
+                        completion_time - responseDequeueTime);
             }
         }
     } else {
@@ -451,8 +743,13 @@ void
 Sequencer::writeCallback(Addr address, DataBlock& data,
                          const bool externalHit, const MachineType mach,
                          const Cycles initialRequestTime,
+                         const Cycles requestEnqueueTime,
                          const Cycles forwardRequestTime,
                          const Cycles firstResponseTime,
+                         const Cycles requestArrivalTime,
+                         const Cycles responderDequeueTime,
+                         const Cycles responseEnqueueTime,
+                         const Cycles responseDequeueTime,
                          const bool noCoales)
 {
     //
@@ -521,15 +818,24 @@ Sequencer::writeCallback(Addr address, DataBlock& data,
 
             if (ruby_request) {
                 recordMissLatency(&seq_req, success, mach, externalHit,
-                                  initialRequestTime, forwardRequestTime,
-                                  firstResponseTime);
+                                  initialRequestTime, requestEnqueueTime,
+                                  forwardRequestTime,
+                                  firstResponseTime, requestArrivalTime,
+                                  responderDequeueTime,
+                                  responseEnqueueTime,
+                                  responseDequeueTime);
             } else {
                 aliased_stores++;
             }
             markRemoved();
             hitCallback(&seq_req, data, success, mach, externalHit,
-                        initialRequestTime, forwardRequestTime,
-                        firstResponseTime, !ruby_request);
+                        initialRequestTime, requestEnqueueTime,
+                        forwardRequestTime,
+                        firstResponseTime, requestArrivalTime,
+                        responderDequeueTime,
+                        responseEnqueueTime,
+                        responseDequeueTime,
+                        !ruby_request);
             ruby_request = false;
         } else {
             // handle read request
@@ -537,8 +843,13 @@ Sequencer::writeCallback(Addr address, DataBlock& data,
             markRemoved();
             aliased_loads++;
             hitCallback(&seq_req, data, true, mach, externalHit,
-                        initialRequestTime, forwardRequestTime,
-                        firstResponseTime, !ruby_request);
+                        initialRequestTime, requestEnqueueTime,
+                        forwardRequestTime,
+                        firstResponseTime, requestArrivalTime,
+                        responderDequeueTime,
+                        responseEnqueueTime,
+                        responseDequeueTime,
+                        !ruby_request);
         }
         seq_req_list.pop_front();
     }
@@ -553,8 +864,13 @@ void
 Sequencer::readCallback(Addr address, DataBlock& data,
                         bool externalHit, const MachineType mach,
                         Cycles initialRequestTime,
+                        Cycles requestEnqueueTime,
                         Cycles forwardRequestTime,
-                        Cycles firstResponseTime)
+                        Cycles firstResponseTime,
+                        Cycles requestArrivalTime,
+                        Cycles responderDequeueTime,
+                        Cycles responseEnqueueTime,
+                        Cycles responseDequeueTime)
 {
     //
     // Free up read requests until we hit the first Write request
@@ -587,13 +903,22 @@ Sequencer::readCallback(Addr address, DataBlock& data,
         }
         if (ruby_request) {
             recordMissLatency(&seq_req, true, mach, externalHit,
-                              initialRequestTime, forwardRequestTime,
-                              firstResponseTime);
+                              initialRequestTime, requestEnqueueTime,
+                              forwardRequestTime,
+                              firstResponseTime, requestArrivalTime,
+                              responderDequeueTime,
+                              responseEnqueueTime,
+                              responseDequeueTime);
         }
         markRemoved();
         hitCallback(&seq_req, data, true, mach, externalHit,
-                    initialRequestTime, forwardRequestTime,
-                    firstResponseTime, !ruby_request);
+                    initialRequestTime, requestEnqueueTime,
+                    forwardRequestTime,
+                    firstResponseTime, requestArrivalTime,
+                    responderDequeueTime,
+                    responseEnqueueTime,
+                    responseDequeueTime,
+                    !ruby_request);
         ruby_request = false;
         seq_req_list.pop_front();
     }
@@ -609,8 +934,13 @@ Sequencer::hitCallback(SequencerRequest* srequest, DataBlock& data,
                        bool llscSuccess,
                        const MachineType mach, const bool externalHit,
                        const Cycles initialRequestTime,
+                       const Cycles requestEnqueueTime,
                        const Cycles forwardRequestTime,
                        const Cycles firstResponseTime,
+                       const Cycles requestArrivalTime,
+                       const Cycles responderDequeueTime,
+                       const Cycles responseEnqueueTime,
+                       const Cycles responseDequeueTime,
                        const bool was_coalesced)
 {
     warn_once("Replacement policy updates recently became the responsibility "

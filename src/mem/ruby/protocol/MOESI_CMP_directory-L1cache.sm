@@ -147,6 +147,24 @@ machine(MachineType:L1Cache, "L1 cache protocol")
     DataBlock DataBlk,       desc="data for the block, required for concurrent writebacks";
     bool Dirty,              desc="Is the data dirty (different than memory)?";
     int NumPendingMsgs, default="0",     desc="Number of acks/data messages that this processor is waiting for";
+    Cycles InitialRequestTime, default="Cycles(0)",
+        desc="time the request was first issued from the requester L1";
+    Cycles RequestEnqueueTime, default="Cycles(0)",
+        desc="time the request became visible in the requester output buffer";
+    Cycles ForwardRequestTime, default="Cycles(0)",
+        desc="time the request was forwarded beyond the initial requester";
+    Cycles FirstResponseTime, default="Cycles(0)",
+        desc="time the first data response was generated";
+    Cycles RequestArrivalTime, default="Cycles(0)",
+        desc="time the request arrived in the responder input buffer";
+    Cycles ResponderDequeueTime, default="Cycles(0)",
+        desc="time the responder dequeued the request";
+    Cycles ResponseEnqueueTime, default="Cycles(0)",
+        desc="time the responder enqueued the response";
+    Cycles ResponseDequeueTime, default="Cycles(0)",
+        desc="time this L1 dequeued the response";
+    MachineType ResponderMach, default="MachineType_NUM",
+        desc="machine type that produced the completing data response";
   }
 
   structure(TBETable, external ="yes") {
@@ -158,6 +176,7 @@ machine(MachineType:L1Cache, "L1 cache protocol")
 
   Tick clockEdge();
   Tick cyclesToTicks(Cycles c);
+  Cycles curCycle();
   void set_cache_entry(AbstractCacheEntry b);
   void unset_cache_entry();
   void set_tbe(TBE b);
@@ -573,6 +592,9 @@ machine(MachineType:L1Cache, "L1 cache protocol")
         out_msg.MessageSize := MessageSizeType:Request_Control;
         out_msg.AccessMode := in_msg.AccessMode;
         out_msg.Prefetch := in_msg.Prefetch;
+        out_msg.InitialRequestTime := curCycle();
+        out_msg.RequestEnqueueTime := curCycle() + request_latency;
+        out_msg.ForwardRequestTime := curCycle();
       }
     }
   }
@@ -589,6 +611,9 @@ machine(MachineType:L1Cache, "L1 cache protocol")
         out_msg.MessageSize := MessageSizeType:Request_Control;
         out_msg.AccessMode := in_msg.AccessMode;
         out_msg.Prefetch := in_msg.Prefetch;
+        out_msg.InitialRequestTime := curCycle();
+        out_msg.RequestEnqueueTime := curCycle() + request_latency;
+        out_msg.ForwardRequestTime := curCycle();
       }
     }
   }
@@ -645,6 +670,9 @@ machine(MachineType:L1Cache, "L1 cache protocol")
           out_msg.Dirty := false;
           out_msg.Acks := in_msg.Acks;
           out_msg.MessageSize := MessageSizeType:Response_Data;
+          out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+          out_msg.ForwardRequestTime := in_msg.ForwardRequestTime;
+          out_msg.FirstResponseTime := curCycle();
         }
         DPRINTF(RubySlicc, "Sending data to L2: %#x\n", in_msg.addr);
       }
@@ -660,6 +688,9 @@ machine(MachineType:L1Cache, "L1 cache protocol")
           out_msg.Dirty := false;
           out_msg.Acks := in_msg.Acks;
           out_msg.MessageSize := MessageSizeType:ResponseLocal_Data;
+          out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+          out_msg.ForwardRequestTime := in_msg.ForwardRequestTime;
+          out_msg.FirstResponseTime := curCycle();
         }
         DPRINTF(RubySlicc, "Sending data to L1\n");
       }
@@ -681,6 +712,9 @@ machine(MachineType:L1Cache, "L1 cache protocol")
           out_msg.Dirty := cache_entry.Dirty;
           out_msg.Acks := in_msg.Acks;
           out_msg.MessageSize := MessageSizeType:Response_Data;
+          out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+          out_msg.ForwardRequestTime := in_msg.ForwardRequestTime;
+          out_msg.FirstResponseTime := curCycle();
         }
         DPRINTF(RubySlicc, "Sending exclusive data to L2\n");
       }
@@ -695,6 +729,9 @@ machine(MachineType:L1Cache, "L1 cache protocol")
           out_msg.Dirty := cache_entry.Dirty;
           out_msg.Acks := in_msg.Acks;
           out_msg.MessageSize := MessageSizeType:ResponseLocal_Data;
+          out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+          out_msg.ForwardRequestTime := in_msg.ForwardRequestTime;
+          out_msg.FirstResponseTime := curCycle();
         }
         DPRINTF(RubySlicc, "Sending exclusive data to L1\n");
       }
@@ -757,14 +794,44 @@ machine(MachineType:L1Cache, "L1 cache protocol")
     assert(is_valid(cache_entry));
     DPRINTF(RubySlicc, "%s\n", cache_entry.DataBlk);
     L1Dcache.setMRU(cache_entry);
-    sequencer.readCallback(address, cache_entry.DataBlk);
+    if (is_valid(tbe)) {
+      sequencer.readCallback(address,
+                             cache_entry.DataBlk,
+                             false,
+                             tbe.ResponderMach,
+                             tbe.InitialRequestTime,
+                             tbe.RequestEnqueueTime,
+                             tbe.ForwardRequestTime,
+                             tbe.FirstResponseTime,
+                             tbe.RequestArrivalTime,
+                             tbe.ResponderDequeueTime,
+                             tbe.ResponseEnqueueTime,
+                             tbe.ResponseDequeueTime);
+    } else {
+      sequencer.readCallback(address, cache_entry.DataBlk);
+    }
   }
 
   action(h_ifetch_hit, "hi", desc="Notify the sequencer about ifetch completion.") {
     assert(is_valid(cache_entry));
     DPRINTF(RubySlicc, "%s\n", cache_entry.DataBlk);
     L1Icache.setMRU(cache_entry);
-    sequencer.readCallback(address, cache_entry.DataBlk);
+    if (is_valid(tbe)) {
+      sequencer.readCallback(address,
+                             cache_entry.DataBlk,
+                             false,
+                             tbe.ResponderMach,
+                             tbe.InitialRequestTime,
+                             tbe.RequestEnqueueTime,
+                             tbe.ForwardRequestTime,
+                             tbe.FirstResponseTime,
+                             tbe.RequestArrivalTime,
+                             tbe.ResponderDequeueTime,
+                             tbe.ResponseEnqueueTime,
+                             tbe.ResponseDequeueTime);
+    } else {
+      sequencer.readCallback(address, cache_entry.DataBlk);
+    }
   }
 
   action(hx_load_hit, "hx", desc="Notify sequencer the load completed.") {
@@ -772,14 +839,44 @@ machine(MachineType:L1Cache, "L1 cache protocol")
     DPRINTF(RubySlicc, "%s\n", cache_entry.DataBlk);
     L1Icache.setMRU(address);
     L1Dcache.setMRU(address);
-    sequencer.readCallback(address, cache_entry.DataBlk, true);
+    if (is_valid(tbe)) {
+      sequencer.readCallback(address,
+                             cache_entry.DataBlk,
+                             true,
+                             tbe.ResponderMach,
+                             tbe.InitialRequestTime,
+                             tbe.RequestEnqueueTime,
+                             tbe.ForwardRequestTime,
+                             tbe.FirstResponseTime,
+                             tbe.RequestArrivalTime,
+                             tbe.ResponderDequeueTime,
+                             tbe.ResponseEnqueueTime,
+                             tbe.ResponseDequeueTime);
+    } else {
+      sequencer.readCallback(address, cache_entry.DataBlk, true);
+    }
   }
 
   action(hh_store_hit, "\h", desc="Notify sequencer that store completed.") {
     assert(is_valid(cache_entry));
     DPRINTF(RubySlicc, "%s\n", cache_entry.DataBlk);
     L1Dcache.setMRU(cache_entry);
-    sequencer.writeCallback(address, cache_entry.DataBlk);
+    if (is_valid(tbe)) {
+      sequencer.writeCallback(address,
+                              cache_entry.DataBlk,
+                              false,
+                              tbe.ResponderMach,
+                              tbe.InitialRequestTime,
+                              tbe.RequestEnqueueTime,
+                              tbe.ForwardRequestTime,
+                              tbe.FirstResponseTime,
+                              tbe.RequestArrivalTime,
+                              tbe.ResponderDequeueTime,
+                              tbe.ResponseEnqueueTime,
+                              tbe.ResponseDequeueTime);
+    } else {
+      sequencer.writeCallback(address, cache_entry.DataBlk);
+    }
     cache_entry.Dirty := true;
   }
 
@@ -788,7 +885,22 @@ machine(MachineType:L1Cache, "L1 cache protocol")
     DPRINTF(RubySlicc, "%s\n", cache_entry.DataBlk);
     L1Icache.setMRU(address);
     L1Dcache.setMRU(address);
-    sequencer.writeCallback(address, cache_entry.DataBlk, true);
+    if (is_valid(tbe)) {
+      sequencer.writeCallback(address,
+                              cache_entry.DataBlk,
+                              true,
+                              tbe.ResponderMach,
+                              tbe.InitialRequestTime,
+                              tbe.RequestEnqueueTime,
+                              tbe.ForwardRequestTime,
+                              tbe.FirstResponseTime,
+                              tbe.RequestArrivalTime,
+                              tbe.ResponderDequeueTime,
+                              tbe.ResponseEnqueueTime,
+                              tbe.ResponseDequeueTime);
+    } else {
+      sequencer.writeCallback(address, cache_entry.DataBlk, true);
+    }
     cache_entry.Dirty := true;
   }
 
@@ -883,6 +995,9 @@ machine(MachineType:L1Cache, "L1 cache protocol")
           out_msg.Dirty := false;
           out_msg.Acks := in_msg.Acks;
           out_msg.MessageSize := MessageSizeType:ResponseLocal_Data;
+          out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+          out_msg.ForwardRequestTime := in_msg.ForwardRequestTime;
+          out_msg.FirstResponseTime := curCycle();
         }
       }
       else {
@@ -898,6 +1013,9 @@ machine(MachineType:L1Cache, "L1 cache protocol")
           out_msg.Dirty := false;
           out_msg.Acks := in_msg.Acks;
           out_msg.MessageSize := MessageSizeType:Response_Data;
+          out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+          out_msg.ForwardRequestTime := in_msg.ForwardRequestTime;
+          out_msg.FirstResponseTime := curCycle();
         }
       }
     }
@@ -917,6 +1035,9 @@ machine(MachineType:L1Cache, "L1 cache protocol")
           out_msg.Dirty := tbe.Dirty;
           out_msg.Acks := in_msg.Acks;
           out_msg.MessageSize := MessageSizeType:ResponseLocal_Data;
+          out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+          out_msg.ForwardRequestTime := in_msg.ForwardRequestTime;
+          out_msg.FirstResponseTime := curCycle();
         }
       }
       else {
@@ -931,6 +1052,9 @@ machine(MachineType:L1Cache, "L1 cache protocol")
           out_msg.Dirty := tbe.Dirty;
           out_msg.Acks := in_msg.Acks;
           out_msg.MessageSize := MessageSizeType:Response_Data;
+          out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+          out_msg.ForwardRequestTime := in_msg.ForwardRequestTime;
+          out_msg.FirstResponseTime := curCycle();
         }
       }
     }
@@ -965,6 +1089,17 @@ machine(MachineType:L1Cache, "L1 cache protocol")
       assert(is_valid(cache_entry));
       cache_entry.DataBlk := in_msg.DataBlk;
       cache_entry.Dirty := in_msg.Dirty;
+      if (is_valid(tbe)) {
+        tbe.InitialRequestTime := in_msg.InitialRequestTime;
+        tbe.RequestEnqueueTime := in_msg.RequestEnqueueTime;
+        tbe.ForwardRequestTime := in_msg.ForwardRequestTime;
+        tbe.FirstResponseTime := in_msg.FirstResponseTime;
+        tbe.RequestArrivalTime := in_msg.RequestArrivalTime;
+        tbe.ResponderDequeueTime := in_msg.ResponderDequeueTime;
+        tbe.ResponseEnqueueTime := in_msg.ResponseEnqueueTime;
+        tbe.ResponseDequeueTime := curCycle();
+        tbe.ResponderMach := in_msg.SenderMachine;
+      }
 
       if (in_msg.Type == CoherenceResponseType:DATA) {
         //assert(in_msg.Dirty == false);

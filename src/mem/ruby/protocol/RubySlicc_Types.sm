@@ -55,6 +55,7 @@ structure(MessageBuffer, buffer="yes", inport="yes", outport="yes",
   // in debug traces dumped by the protocol.
   bool areNSlotsAvailable(int n, Tick curTime);
   int getSize(Tick curTime);
+  Tick getHeadEnqueueTime();
 }
 
 external_type(Scalar, primitive="yes");
@@ -131,12 +132,16 @@ structure (Sequencer, external = "yes") {
   void readCallback(Addr, DataBlock, bool, MachineType);
   void readCallback(Addr, DataBlock, bool, MachineType,
                     Cycles, Cycles, Cycles);
+  void readCallback(Addr, DataBlock, bool, MachineType,
+                    Cycles, Cycles, Cycles, Cycles, Cycles, Cycles, Cycles, Cycles);
 
   void writeCallback(Addr, DataBlock);
   void writeCallback(Addr, DataBlock, bool);
   void writeCallback(Addr, DataBlock, bool, MachineType);
   void writeCallback(Addr, DataBlock, bool, MachineType,
                      Cycles, Cycles, Cycles);
+  void writeCallback(Addr, DataBlock, bool, MachineType,
+                     Cycles, Cycles, Cycles, Cycles, Cycles, Cycles, Cycles, Cycles);
   void writeUniqueCallback(Addr, DataBlock);
 
   // ll/sc support
