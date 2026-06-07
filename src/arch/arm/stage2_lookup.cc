@@ -44,7 +44,6 @@
 #include "cpu/base.hh"
 #include "cpu/thread_context.hh"
 #include "debug/Checkpoint.hh"
-#include "debug/LoadLifecycle.hh"
 #include "debug/TLB.hh"
 #include "debug/TLBVerbose.hh"
 #include "sim/system.hh"
@@ -167,24 +166,6 @@ Stage2LookUp::mergeTe(const RequestPtr &req, BaseMMU::Mode mode)
         }
         stage1Te.updateAttributes();
 
-        if (mode != BaseMMU::Execute &&
-            s1Req->getVaddr() >= 0x490000 && s1Req->getVaddr() < 0x4d0000) {
-            DPRINTF(LoadLifecycle,
-                    "stage2_merge vaddr=%#x s1_paddr=%#x final_paddr=%#x "
-                    "s1_mtype=%u s1_nc=%d s2_mtype=%u s2_nc=%d final_mtype=%u "
-                    "final_nc=%d final_inner=%u final_outer=%u final_share=%d "
-                    "s1_priv=%d\n",
-                    s1Req->getVaddr(), req->getVaddr(),
-                    stage1Te.pAddr(s1Req->getVaddr()),
-                    static_cast<unsigned>(s1OrigMtype), s1OrigNc,
-                    static_cast<unsigned>(stage2Te->mtype),
-                    stage2Te->nonCacheable,
-                    static_cast<unsigned>(stage1Te.mtype),
-                    stage1Te.nonCacheable,
-                    stage1Te.innerAttrs, stage1Te.outerAttrs,
-                    stage1Te.shareable,
-                    s1Req->isPriv());
-        }
     }
 
     // if there's a fault annotate it,

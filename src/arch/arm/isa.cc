@@ -49,7 +49,6 @@
 #include "cpu/checker/cpu.hh"
 #include "cpu/reg_class.hh"
 #include "debug/Arm.hh"
-#include "debug/LoadLifecycle.hh"
 #include "debug/MiscRegs.hh"
 #include "dev/arm/generic_timer.hh"
 #include "dev/arm/gic_v3.hh"
@@ -868,20 +867,6 @@ ISA::setMiscRegNoEffect(int misc_reg, RegVal val)
     int lower = map.first, upper = map.second;
 
     auto v = (val & ~reg.wi()) | reg.rao();
-    if (misc_reg == MISCREG_MAIR_EL1 || misc_reg == MISCREG_SCTLR_EL1) {
-        Addr pc = 0;
-        int cpuId = -1;
-        if (tc) {
-            pc = tc->pcState().instAddr();
-            if (auto *cpu = tc->getCpuPtr()) {
-                cpuId = cpu->cpuId();
-            }
-        }
-        DPRINTF(LoadLifecycle,
-                "misc_write_noeffect cpu=%d pc=%#x reg=%s new=%#llx\n",
-                cpuId, pc, miscRegName[misc_reg],
-                static_cast<unsigned long long>(v));
-    }
     if (upper > 0) {
         miscRegs[lower] = bits(v, 31, 0);
         miscRegs[upper] = bits(v, 63, 32);
@@ -2338,22 +2323,6 @@ ISA::setMiscReg(int misc_reg, RegVal val)
             break;
         }
     }
-    if (misc_reg == MISCREG_MAIR_EL1 || misc_reg == MISCREG_SCTLR_EL1) {
-        const RegVal oldVal = readMiscRegNoEffect(misc_reg);
-        Addr pc = 0;
-        int cpuId = -1;
-        if (tc) {
-            pc = tc->pcState().instAddr();
-            if (auto *cpu = tc->getCpuPtr()) {
-                cpuId = cpu->cpuId();
-            }
-        }
-        DPRINTF(LoadLifecycle,
-                "misc_write cpu=%d pc=%#x reg=%s old=%#llx new=%#llx\n",
-                cpuId, pc, miscRegName[misc_reg],
-                static_cast<unsigned long long>(oldVal),
-                static_cast<unsigned long long>(newVal));
-    }
     setMiscRegNoEffect(misc_reg, newVal);
 }
 
@@ -2449,21 +2418,6 @@ ISA::unserialize(CheckpointIn &cp)
     setMiscRegNoEffect(MISCREG_AMAIR_EL1, miscRegs[MISCREG_AMAIR_EL1]);
     setMiscRegNoEffect(MISCREG_MAIR_EL2, miscRegs[MISCREG_MAIR_EL2]);
     setMiscRegNoEffect(MISCREG_AMAIR_EL2, miscRegs[MISCREG_AMAIR_EL2]);
-    DPRINTF(LoadLifecycle,
-            "post_unserialize slot_mair_el1=%#llx mair_el1=%#llx "
-            "prrr_ns=%#x nmrr_ns=%#x mair0_ns=%#x mair1_ns=%#x "
-            "slot_sctlr_el1=%#llx sctlr_el1=%#llx hcr_el2=%#llx cpsr=%#x\n",
-            static_cast<unsigned long long>(miscRegs[MISCREG_MAIR_EL1]),
-            static_cast<unsigned long long>(
-                readMiscRegNoEffect(MISCREG_MAIR_EL1)),
-            static_cast<unsigned>(miscRegs[MISCREG_PRRR_NS]),
-            static_cast<unsigned>(miscRegs[MISCREG_NMRR_NS]),
-            static_cast<unsigned>(miscRegs[MISCREG_MAIR0_NS]),
-            static_cast<unsigned>(miscRegs[MISCREG_MAIR1_NS]),
-            static_cast<unsigned long long>(miscRegs[MISCREG_SCTLR_EL1]),
-            static_cast<unsigned long long>(miscRegs[MISCREG_SCTLR_EL1]),
-            static_cast<unsigned long long>(miscRegs[MISCREG_HCR_EL2]),
-            static_cast<unsigned>(miscRegs[MISCREG_CPSR]));
     CPSR tmp_cpsr = miscRegs[MISCREG_CPSR];
     updateRegMap(tmp_cpsr);
 }

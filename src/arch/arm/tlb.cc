@@ -61,7 +61,6 @@
 #include "cpu/base.hh"
 #include "cpu/thread_context.hh"
 #include "debug/Checkpoint.hh"
-#include "debug/LoadLifecycle.hh"
 #include "debug/TLB.hh"
 #include "debug/TLBVerbose.hh"
 #include "mem/packet_access.hh"
@@ -1175,31 +1174,6 @@ TLB::translateMmuOn(ThreadContext* tc, const RequestPtr &req,
             req->setFlags(Request::STRICT_ORDER);
         }
 
-        if (!is_fetch && vaddr_tainted >= 0x490000 &&
-            vaddr_tainted < 0x4d0000) {
-            DPRINTF(LoadLifecycle,
-                    "tlb_result stage=%u vaddr=%#x paddr=%#x mtype=%u "
-                    "noncacheable=%d inner=%u outer=%u shareable=%d "
-                    "stage2req=%d directToStage2=%d fault=%d req_flags=%#llx "
-                    "strict_before=%d uncacheable_before=%d priv_req=%d\n",
-                    isStage2 ? 2 : 1, vaddr_tainted,
-                    te->pAddr(vaddr),
-                    static_cast<unsigned>(te->mtype), te->nonCacheable,
-                    te->innerAttrs, te->outerAttrs, te->shareable,
-                    stage2Req, directToStage2, fault != NoFault,
-                    static_cast<unsigned long long>(req->getFlags()),
-                    req->isStrictlyOrdered(), req->isUncacheable(),
-                    req->isPriv());
-        }
-
-        // Probe: if ordinary user-space data accesses are being
-        // misclassified as non-Normal memory, force them back onto the
-        // normal O3 path so we can measure the impact of STRICT_ORDER
-        // alone. Keep fetches and privileged/kernel accesses unchanged.
-        if (!is_fetch && (flags & UserMode)) {
-            req->clearFlags(Request::STRICT_ORDER);
-        }
-
         Addr pa = te->pAddr(vaddr);
         req->setPaddr(pa);
 
@@ -1304,14 +1278,6 @@ TLB::translateFs(const RequestPtr &req, ThreadContext *tc, BaseMMU::Mode mode,
         // Translation enabled
         fault = translateMmuOn(tc, req, mode, translation, delay, timing,
                                functional, vaddr, tranMethod);
-    }
-
-    // Probe: force ordinary user-space data accesses onto the normal O3
-    // path after the full translation result is known, including any
-    // stage-2 merge. This avoids missing cases where a later translation
-    // stage reintroduces STRICT_ORDER after translateMmuOn().
-    if (fault == NoFault && !is_fetch && (flags & UserMode)) {
-        req->clearFlags(Request::STRICT_ORDER);
     }
 
     // Check for Debug Exceptions

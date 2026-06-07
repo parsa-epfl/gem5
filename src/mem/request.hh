@@ -759,13 +759,6 @@ class Request
     }
 
     void
-    clearFlags(Flags flags)
-    {
-        assert(hasPaddr() || hasVaddr());
-        _flags.clear(flags);
-    }
-
-    void
     setCacheCoherenceFlags(CacheCoherenceFlags extraFlags)
     {
         // TODO: do mem_sync_op requests have valid paddr/vaddr?
