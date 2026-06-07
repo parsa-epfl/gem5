@@ -136,6 +136,15 @@ def define_options(parser):
     parser.add_argument(
         "--recycle-latency", type=int, default=10,
         help="Recycle latency for ruby controller input buffers")
+    parser.add_argument(
+        "--mem-frontend-latency", type=str, default=None,
+        help="Override MemCtrl static frontend latency, e.g. 4ns")
+    parser.add_argument(
+        "--mem-backend-latency", type=str, default=None,
+        help="Override MemCtrl static backend latency, e.g. 4ns")
+    parser.add_argument(
+        "--simple-mem-latency", type=str, default=None,
+        help="Override SimpleMemory request latency, e.g. 45ns")
 
     protocol = buildEnv['PROTOCOL']
     exec("from . import %s" % protocol)
@@ -188,8 +197,21 @@ def setup_memory_controllers(system, ruby, dir_cntrls, options):
                         fatal("--mem-ranks must be greater than 0")
                     dram_intf.ranks_per_channel = mem_ranks
                 mem_ctrl = m5.objects.MemCtrl(dram = dram_intf)
+                if options.mem_frontend_latency is not None:
+                    mem_ctrl.static_frontend_latency = (
+                        options.mem_frontend_latency
+                    )
+                if options.mem_backend_latency is not None:
+                    mem_ctrl.static_backend_latency = (
+                        options.mem_backend_latency
+                    )
             else:
                 mem_ctrl = dram_intf
+                if (
+                    options.simple_mem_latency is not None
+                    and hasattr(mem_ctrl, "latency")
+                ):
+                    mem_ctrl.latency = options.simple_mem_latency
 
             if options.access_backing_store:
                 dram_intf.kvm_map=False

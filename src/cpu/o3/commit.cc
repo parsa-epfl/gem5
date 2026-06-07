@@ -202,6 +202,12 @@ Commit::CommitStats::CommitStats(CPU *cpu, Commit *commit)
       ADD_STAT(memRefs, statistics::units::Count::get(),
                "Number of memory references committed"),
       ADD_STAT(loads, statistics::units::Count::get(), "Number of loads committed"),
+      ADD_STAT(loadCompletionToRetire,
+               "Distribution of cycle latency between load memory "
+               "completion and retire"),
+      ADD_STAT(storeCompletionToRetire,
+               "Distribution of cycle latency between store memory "
+               "completion and retire"),
       ADD_STAT(amos, statistics::units::Count::get(),
                "Number of atomic instructions committed"),
       ADD_STAT(membars, statistics::units::Count::get(),
@@ -310,6 +316,14 @@ Commit::CommitStats::CommitStats(CPU *cpu, Commit *commit)
     loads
         .init(cpu->numThreads)
         .flags(total);
+
+    loadCompletionToRetire
+        .init(0, 999, 10)
+        .flags(statistics::nozero);
+
+    storeCompletionToRetire
+        .init(0, 999, 10)
+        .flags(statistics::nozero);
 
     amos
         .init(cpu->numThreads)
@@ -1459,6 +1473,16 @@ Commit::commitHead(const DynInstPtr &head_inst, unsigned inst_num)
     }
 
     updateComInstStats(head_inst);
+
+    if (head_inst->memCompleteTick != static_cast<Tick>(-1)) {
+        const Cycles completionToRetire = cpu->ticksToCycles(
+            curTick() - head_inst->memCompleteTick);
+        if (head_inst->isLoad()) {
+            stats.loadCompletionToRetire.sample(completionToRetire);
+        } else if (head_inst->isStore()) {
+            stats.storeCompletionToRetire.sample(completionToRetire);
+        }
+    }
 
     DPRINTF(Commit,
             "[tid:%i] [sn:%llu] Committing instruction with PC %s\n",

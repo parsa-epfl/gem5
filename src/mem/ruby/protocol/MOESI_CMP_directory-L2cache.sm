@@ -246,6 +246,20 @@ machine(MachineType:L2Cache, "Token protocol")
     MachineID L1_GetX_ID,          desc="ID of the L1 cache to forward the block to once we get a response";
     NetDest Fwd_GetS_IDs,            desc="Set of the internal processors that want the block in shared state";
     MachineID Fwd_GetX_ID,          desc="ID of the L1 cache to forward the block to once we get a response";
+    Cycles InitialRequestTime, default="Cycles(0)",
+        desc="time the request was first issued from the requester L1";
+    Cycles RequestEnqueueTime, default="Cycles(0)",
+        desc="time the request became visible in the requester output buffer";
+    Cycles ForwardRequestTime, default="Cycles(0)",
+        desc="time the request was forwarded beyond the initial requester";
+    Cycles FirstResponseTime, default="Cycles(0)",
+        desc="time the first data response was generated";
+    Cycles RequestArrivalTime, default="Cycles(0)",
+        desc="time the request arrived in the responder input buffer";
+    Cycles ResponderDequeueTime, default="Cycles(0)",
+        desc="time the responder dequeued the request";
+    Cycles ResponseEnqueueTime, default="Cycles(0)",
+        desc="time the responder enqueued the response";
   }
 
   structure(TBETable, external = "yes") {
@@ -267,6 +281,8 @@ machine(MachineType:L2Cache, "Token protocol")
 
   Tick clockEdge();
   Tick cyclesToTicks(Cycles c);
+  Cycles ticksToCycles(Tick t);
+  Cycles curCycle();
   void set_cache_entry(AbstractCacheEntry b);
   void unset_cache_entry();
   void set_tbe(TBE b);
@@ -926,6 +942,7 @@ machine(MachineType:L2Cache, "Token protocol")
 
   action(a_issueGETS, "a", desc="issue local request globally") {
     peek(L1requestNetwork_in, RequestMsg) {
+      assert(is_valid(tbe));
       enqueue(globalRequestNetwork_out, RequestMsg, request_latency) {
         out_msg.addr := address;
         out_msg.Type := CoherenceRequestType:GETS;
@@ -933,12 +950,16 @@ machine(MachineType:L2Cache, "Token protocol")
         out_msg.Requestor := machineID;
         out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
         out_msg.MessageSize := MessageSizeType:Request_Control;
+        out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+        out_msg.ForwardRequestTime := curCycle();
       }
+      tbe.ForwardRequestTime := curCycle();
     }
   }
 
   action(a_issueGETX, "\a", desc="issue local request globally") {
     peek(L1requestNetwork_in, RequestMsg) {
+      assert(is_valid(tbe));
       enqueue(globalRequestNetwork_out, RequestMsg, request_latency) {
         out_msg.addr := address;
         out_msg.Type := CoherenceRequestType:GETX;
@@ -946,7 +967,10 @@ machine(MachineType:L2Cache, "Token protocol")
         out_msg.Requestor := machineID;
         out_msg.Destination.add(mapAddressToMachine(address, MachineType:Directory));
         out_msg.MessageSize := MessageSizeType:Request_Control;
+        out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+        out_msg.ForwardRequestTime := curCycle();
       }
+      tbe.ForwardRequestTime := curCycle();
     }
   }
 
@@ -997,6 +1021,13 @@ machine(MachineType:L2Cache, "Token protocol")
       // shared data should be clean
       out_msg.Dirty := false;
       out_msg.MessageSize := MessageSizeType:Response_Data;
+      out_msg.InitialRequestTime := tbe.InitialRequestTime;
+      out_msg.RequestEnqueueTime := tbe.RequestEnqueueTime;
+      out_msg.ForwardRequestTime := tbe.ForwardRequestTime;
+      out_msg.FirstResponseTime := tbe.FirstResponseTime;
+      out_msg.RequestArrivalTime := tbe.RequestArrivalTime;
+      out_msg.ResponderDequeueTime := tbe.ResponderDequeueTime;
+      out_msg.ResponseEnqueueTime := tbe.ResponseEnqueueTime;
     }
     DPRINTF(RubySlicc, "Address: %#x, Data Block: %s\n",
             address, tbe.DataBlk);
@@ -1014,6 +1045,13 @@ machine(MachineType:L2Cache, "Token protocol")
       out_msg.Dirty := tbe.Dirty;
       out_msg.Acks := tbe.Local_GETX_IntAcks;
       out_msg.MessageSize := MessageSizeType:Response_Data;
+      out_msg.InitialRequestTime := tbe.InitialRequestTime;
+      out_msg.RequestEnqueueTime := tbe.RequestEnqueueTime;
+      out_msg.ForwardRequestTime := tbe.ForwardRequestTime;
+      out_msg.FirstResponseTime := tbe.FirstResponseTime;
+      out_msg.RequestArrivalTime := tbe.RequestArrivalTime;
+      out_msg.ResponderDequeueTime := tbe.ResponderDequeueTime;
+      out_msg.ResponseEnqueueTime := tbe.ResponseEnqueueTime;
     }
     DPRINTF(RubySlicc, "Address: %#x, Data Block: %s\n",
             address, tbe.DataBlk);
@@ -1030,6 +1068,13 @@ machine(MachineType:L2Cache, "Token protocol")
       out_msg.DataBlk := tbe.DataBlk;
       out_msg.Dirty := tbe.Dirty;
       out_msg.MessageSize := MessageSizeType:Response_Data;
+      out_msg.InitialRequestTime := tbe.InitialRequestTime;
+      out_msg.RequestEnqueueTime := tbe.RequestEnqueueTime;
+      out_msg.ForwardRequestTime := tbe.ForwardRequestTime;
+      out_msg.FirstResponseTime := tbe.FirstResponseTime;
+      out_msg.RequestArrivalTime := tbe.RequestArrivalTime;
+      out_msg.ResponderDequeueTime := tbe.ResponderDequeueTime;
+      out_msg.ResponseEnqueueTime := tbe.ResponseEnqueueTime;
     }
   }
 
@@ -1045,6 +1090,13 @@ machine(MachineType:L2Cache, "Token protocol")
       out_msg.Dirty := tbe.Dirty;
       out_msg.Acks := tbe.Fwd_GETX_ExtAcks;
       out_msg.MessageSize := MessageSizeType:Response_Data;
+      out_msg.InitialRequestTime := tbe.InitialRequestTime;
+      out_msg.RequestEnqueueTime := tbe.RequestEnqueueTime;
+      out_msg.ForwardRequestTime := tbe.ForwardRequestTime;
+      out_msg.FirstResponseTime := tbe.FirstResponseTime;
+      out_msg.RequestArrivalTime := tbe.RequestArrivalTime;
+      out_msg.ResponderDequeueTime := tbe.ResponderDequeueTime;
+      out_msg.ResponseEnqueueTime := tbe.ResponseEnqueueTime;
     }
   }
 
@@ -1063,6 +1115,13 @@ machine(MachineType:L2Cache, "Token protocol")
         out_msg.Dirty := false;
         out_msg.Acks := tbe.Fwd_GETX_ExtAcks;
         out_msg.MessageSize := MessageSizeType:Response_Data;
+        out_msg.InitialRequestTime := tbe.InitialRequestTime;
+        out_msg.RequestEnqueueTime := tbe.RequestEnqueueTime;
+        out_msg.ForwardRequestTime := tbe.ForwardRequestTime;
+        out_msg.FirstResponseTime := tbe.FirstResponseTime;
+        out_msg.RequestArrivalTime := tbe.RequestArrivalTime;
+        out_msg.ResponderDequeueTime := tbe.ResponderDequeueTime;
+        out_msg.ResponseEnqueueTime := tbe.ResponseEnqueueTime;
       }
     }
     DPRINTF(RubySlicc, "Address: %#x, Data Block: %s\n",
@@ -1083,6 +1142,13 @@ machine(MachineType:L2Cache, "Token protocol")
       out_msg.Dirty := false;
       out_msg.Acks := tbe.Fwd_GETX_ExtAcks;
       out_msg.MessageSize := MessageSizeType:Response_Data;
+      out_msg.InitialRequestTime := tbe.InitialRequestTime;
+      out_msg.RequestEnqueueTime := tbe.RequestEnqueueTime;
+      out_msg.ForwardRequestTime := tbe.ForwardRequestTime;
+      out_msg.FirstResponseTime := tbe.FirstResponseTime;
+      out_msg.RequestArrivalTime := tbe.RequestArrivalTime;
+      out_msg.ResponderDequeueTime := tbe.ResponderDequeueTime;
+      out_msg.ResponseEnqueueTime := tbe.ResponseEnqueueTime;
     }
     DPRINTF(RubySlicc, "Address: %#x, Data Block: %s\n",
             address, tbe.DataBlk);
@@ -1100,6 +1166,13 @@ machine(MachineType:L2Cache, "Token protocol")
       out_msg.Dirty := tbe.Dirty;
       out_msg.Acks := tbe.Fwd_GETX_ExtAcks;
       out_msg.MessageSize := MessageSizeType:Response_Data;
+      out_msg.InitialRequestTime := tbe.InitialRequestTime;
+      out_msg.RequestEnqueueTime := tbe.RequestEnqueueTime;
+      out_msg.ForwardRequestTime := tbe.ForwardRequestTime;
+      out_msg.FirstResponseTime := tbe.FirstResponseTime;
+      out_msg.RequestArrivalTime := tbe.RequestArrivalTime;
+      out_msg.ResponderDequeueTime := tbe.ResponderDequeueTime;
+      out_msg.ResponseEnqueueTime := tbe.ResponseEnqueueTime;
     }
     DPRINTF(RubySlicc, "Address: %#x, Data Block: %s\n",
             address, tbe.DataBlk);
@@ -1119,6 +1192,13 @@ machine(MachineType:L2Cache, "Token protocol")
         // shared data should be clean
         out_msg.Dirty := false;
         out_msg.MessageSize := MessageSizeType:ResponseL2hit_Data;
+        out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+        out_msg.RequestEnqueueTime := in_msg.RequestEnqueueTime;
+        out_msg.RequestArrivalTime := ticksToCycles(L1RequestToL2Cache.getHeadEnqueueTime());
+        out_msg.ForwardRequestTime := in_msg.InitialRequestTime;
+        out_msg.FirstResponseTime := curCycle();
+        out_msg.ResponderDequeueTime := curCycle();
+        out_msg.ResponseEnqueueTime := curCycle();
       }
     }
     DPRINTF(RubySlicc, "Address: %#x, Data Block: %s\n",
@@ -1139,6 +1219,13 @@ machine(MachineType:L2Cache, "Token protocol")
         out_msg.Dirty := cache_entry.Dirty;
         out_msg.MessageSize := MessageSizeType:ResponseL2hit_Data;
         out_msg.Acks := tbe.Local_GETX_IntAcks;
+        out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+        out_msg.RequestEnqueueTime := in_msg.RequestEnqueueTime;
+        out_msg.RequestArrivalTime := ticksToCycles(L1RequestToL2Cache.getHeadEnqueueTime());
+        out_msg.ForwardRequestTime := in_msg.InitialRequestTime;
+        out_msg.FirstResponseTime := curCycle();
+        out_msg.ResponderDequeueTime := curCycle();
+        out_msg.ResponseEnqueueTime := curCycle();
       }
     }
     DPRINTF(RubySlicc, "Address: %#x, Data Block: %s\n",
@@ -1158,6 +1245,13 @@ machine(MachineType:L2Cache, "Token protocol")
         out_msg.Dirty := cache_entry.Dirty;
         out_msg.MessageSize := MessageSizeType:Response_Data;
         out_msg.Acks := in_msg.Acks;
+        out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+        out_msg.RequestEnqueueTime := in_msg.RequestEnqueueTime;
+        out_msg.RequestArrivalTime := ticksToCycles(GlobalRequestToL2Cache.getHeadEnqueueTime());
+        out_msg.ForwardRequestTime := in_msg.ForwardRequestTime;
+        out_msg.FirstResponseTime := curCycle();
+        out_msg.ResponderDequeueTime := curCycle();
+        out_msg.ResponseEnqueueTime := curCycle();
       }
     }
     DPRINTF(RubySlicc, "Address: %#x, Data Block: %s\n",
@@ -1179,6 +1273,13 @@ machine(MachineType:L2Cache, "Token protocol")
         // shared data should be clean
         out_msg.Dirty := false;
         out_msg.MessageSize := MessageSizeType:Response_Data;
+        out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+        out_msg.RequestEnqueueTime := in_msg.RequestEnqueueTime;
+        out_msg.RequestArrivalTime := ticksToCycles(GlobalRequestToL2Cache.getHeadEnqueueTime());
+        out_msg.ForwardRequestTime := in_msg.ForwardRequestTime;
+        out_msg.FirstResponseTime := curCycle();
+        out_msg.ResponderDequeueTime := curCycle();
+        out_msg.ResponseEnqueueTime := curCycle();
       }
     }
     DPRINTF(RubySlicc, "Address: %#x, Data Block: %s\n",
@@ -1197,6 +1298,13 @@ machine(MachineType:L2Cache, "Token protocol")
         out_msg.DataBlk := cache_entry.DataBlk;
         out_msg.Dirty := cache_entry.Dirty;
         out_msg.MessageSize := MessageSizeType:Response_Data;
+        out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+        out_msg.RequestEnqueueTime := in_msg.RequestEnqueueTime;
+        out_msg.RequestArrivalTime := ticksToCycles(GlobalRequestToL2Cache.getHeadEnqueueTime());
+        out_msg.ForwardRequestTime := in_msg.ForwardRequestTime;
+        out_msg.FirstResponseTime := curCycle();
+        out_msg.ResponderDequeueTime := curCycle();
+        out_msg.ResponseEnqueueTime := curCycle();
       }
     }
   }
@@ -1440,6 +1548,21 @@ machine(MachineType:L2Cache, "Token protocol")
       assert(is_valid(tbe));
       tbe.DataBlk := in_msg.DataBlk;
       tbe.Dirty := in_msg.Dirty;
+      if (tbe.FirstResponseTime == zero_time()) {
+        tbe.FirstResponseTime := in_msg.FirstResponseTime;
+      }
+      if (tbe.RequestEnqueueTime == zero_time()) {
+        tbe.RequestEnqueueTime := in_msg.RequestEnqueueTime;
+      }
+      if (tbe.RequestArrivalTime == zero_time()) {
+        tbe.RequestArrivalTime := in_msg.RequestArrivalTime;
+      }
+      if (tbe.ResponderDequeueTime == zero_time()) {
+        tbe.ResponderDequeueTime := in_msg.ResponderDequeueTime;
+      }
+      if (tbe.ResponseEnqueueTime == zero_time()) {
+        tbe.ResponseEnqueueTime := in_msg.ResponseEnqueueTime;
+      }
       APPEND_TRANSITION_COMMENT(in_msg.Sender);
     }
   }
@@ -1456,6 +1579,13 @@ machine(MachineType:L2Cache, "Token protocol")
     tbe.NumExtPendingAcks := 0;  // default value
     tbe.Fwd_GetS_IDs.clear();
     tbe.L1_GetS_IDs.clear();
+    tbe.InitialRequestTime := zero_time();
+    tbe.RequestEnqueueTime := zero_time();
+    tbe.ForwardRequestTime := zero_time();
+    tbe.FirstResponseTime := zero_time();
+    tbe.RequestArrivalTime := zero_time();
+    tbe.ResponderDequeueTime := zero_time();
+    tbe.ResponseEnqueueTime := zero_time();
   }
 
 
@@ -1471,6 +1601,8 @@ machine(MachineType:L2Cache, "Token protocol")
         out_msg.Type := in_msg.Type;
         out_msg.MessageSize := MessageSizeType:Forwarded_Control;
         out_msg.Acks := 0 - 1;
+        out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+        out_msg.ForwardRequestTime := in_msg.ForwardRequestTime;
       }
     }
   }
@@ -1486,6 +1618,8 @@ machine(MachineType:L2Cache, "Token protocol")
         out_msg.Type := in_msg.Type;
         out_msg.MessageSize := MessageSizeType:Forwarded_Control;
         out_msg.Acks := 0 - 1;
+        out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+        out_msg.ForwardRequestTime := in_msg.ForwardRequestTime;
       }
     }
   }
@@ -1502,6 +1636,8 @@ machine(MachineType:L2Cache, "Token protocol")
         DirEntry dir_entry := getDirEntry(in_msg.addr);
         out_msg.Destination.add(dir_entry.Sharers.smallestElement(MachineType:L1Cache));
         out_msg.MessageSize := MessageSizeType:Forwarded_Control;
+        out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+        out_msg.ForwardRequestTime := curCycle();
       }
     }
   }
@@ -1517,6 +1653,8 @@ machine(MachineType:L2Cache, "Token protocol")
       out_msg.Destination.add(dir_entry.Owner);
       out_msg.MessageSize := MessageSizeType:Forwarded_Control;
       out_msg.Acks := 1 + tbe.Local_GETX_IntAcks;
+      out_msg.InitialRequestTime := tbe.InitialRequestTime;
+      out_msg.ForwardRequestTime := curCycle();
     }
   }
 
@@ -1531,6 +1669,8 @@ machine(MachineType:L2Cache, "Token protocol")
         out_msg.Destination.add(getLocalOwner(cache_entry, in_msg.addr));
         out_msg.MessageSize := MessageSizeType:Forwarded_Control;
         out_msg.Acks := 1;
+        out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+        out_msg.ForwardRequestTime := curCycle();
       }
     }
   }
@@ -1678,6 +1818,9 @@ machine(MachineType:L2Cache, "Token protocol")
     peek(L1requestNetwork_in, RequestMsg) {
       assert(is_valid(tbe));
       tbe.L1_GetX_ID := in_msg.Requestor;
+      tbe.InitialRequestTime := in_msg.InitialRequestTime;
+      tbe.RequestEnqueueTime := in_msg.RequestEnqueueTime;
+      tbe.RequestArrivalTime := ticksToCycles(L1RequestToL2Cache.getHeadEnqueueTime());
     }
   }
 
@@ -1690,6 +1833,9 @@ machine(MachineType:L2Cache, "Token protocol")
     peek(L1requestNetwork_in, RequestMsg) {
       assert(is_valid(tbe));
       tbe.L1_GetS_IDs.add(in_msg.Requestor);
+      tbe.InitialRequestTime := in_msg.InitialRequestTime;
+      tbe.RequestEnqueueTime := in_msg.RequestEnqueueTime;
+      tbe.RequestArrivalTime := ticksToCycles(L1RequestToL2Cache.getHeadEnqueueTime());
     }
   }
 
@@ -1698,6 +1844,10 @@ machine(MachineType:L2Cache, "Token protocol")
       assert(is_valid(tbe));
       tbe.Fwd_GetX_ID := in_msg.Requestor;
       tbe.Fwd_GETX_ExtAcks := in_msg.Acks;
+      tbe.InitialRequestTime := in_msg.InitialRequestTime;
+      tbe.RequestEnqueueTime := in_msg.RequestEnqueueTime;
+      tbe.RequestArrivalTime := ticksToCycles(GlobalRequestToL2Cache.getHeadEnqueueTime());
+      tbe.ForwardRequestTime := in_msg.ForwardRequestTime;
     }
   }
 
@@ -1706,6 +1856,10 @@ machine(MachineType:L2Cache, "Token protocol")
       assert(is_valid(tbe));
       tbe.Fwd_GetS_IDs.clear();
       tbe.Fwd_GetS_IDs.add(in_msg.Requestor);
+      tbe.InitialRequestTime := in_msg.InitialRequestTime;
+      tbe.RequestEnqueueTime := in_msg.RequestEnqueueTime;
+      tbe.RequestArrivalTime := ticksToCycles(GlobalRequestToL2Cache.getHeadEnqueueTime());
+      tbe.ForwardRequestTime := in_msg.ForwardRequestTime;
     }
   }
 

@@ -84,6 +84,8 @@ Stage2LookUp::mergeTe(const RequestPtr &req, BaseMMU::Mode mode)
     // Check again that we haven't got a fault
     if (fault == NoFault) {
         assert(stage2Te != NULL);
+        const auto s1OrigMtype = stage1Te.mtype;
+        const bool s1OrigNc = stage1Te.nonCacheable;
 
         // Now we have the table entries for both stages of translation
         // merge them and insert the result into the stage 1 TLB. See
@@ -163,6 +165,7 @@ Stage2LookUp::mergeTe(const RequestPtr &req, BaseMMU::Mode mode)
             stage1Te.outerShareable = true;
         }
         stage1Te.updateAttributes();
+
     }
 
     // if there's a fault annotate it,

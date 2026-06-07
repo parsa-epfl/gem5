@@ -2410,6 +2410,14 @@ ISA::unserialize(CheckpointIn &cp)
 {
     DPRINTF(Checkpoint, "Unserializing Arm Misc Registers\n");
     UNSERIALIZE_MAPPING(miscRegs, miscRegName, NUM_PHYS_MISCREGS);
+    // Checkpoints carry the architectural AArch64 MAIR slots, but the read
+    // path for MAIR_EL1/EL2 reconstructs the value from the mapped backing
+    // registers. Resynchronize the backing state here so fresh page walks see
+    // the same memory attributes as the restored architectural register image.
+    setMiscRegNoEffect(MISCREG_MAIR_EL1, miscRegs[MISCREG_MAIR_EL1]);
+    setMiscRegNoEffect(MISCREG_AMAIR_EL1, miscRegs[MISCREG_AMAIR_EL1]);
+    setMiscRegNoEffect(MISCREG_MAIR_EL2, miscRegs[MISCREG_MAIR_EL2]);
+    setMiscRegNoEffect(MISCREG_AMAIR_EL2, miscRegs[MISCREG_AMAIR_EL2]);
     CPSR tmp_cpsr = miscRegs[MISCREG_CPSR];
     updateRegMap(tmp_cpsr);
 }

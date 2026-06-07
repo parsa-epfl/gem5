@@ -114,10 +114,22 @@ Throttle::operateVnet(int vnet, int &bw_remaining, bool &schedule_wakeup,
             // Find the size of the message we are moving
             MsgPtr msg_ptr = in->peekMsgPtr();
             Message *net_msg_ptr = msg_ptr.get();
+            Cycles input_queue_wait =
+                m_switch->ticksToCycles(
+                    current_time - in->getHeadEnqueueTime());
             m_units_remaining[vnet] +=
                 network_message_to_size(net_msg_ptr);
 
-            DPRINTF(RubyNetwork, "throttle: %d my bw %d bw spent "
+            (*(throttleStats.m_input_queue_wait_total))[vnet] +=
+                input_queue_wait;
+            (*(throttleStats.m_input_queue_wait_samples))[vnet]++;
+            (*(throttleStats.m_input_queue_wait_total_by_type))
+                [net_msg_ptr->getMessageSize()] += input_queue_wait;
+            (*(throttleStats.m_input_queue_wait_samples_by_type))
+                [net_msg_ptr->getMessageSize()]++;
+
+            DPRINTF(RubyNetwork,
+                    "throttle: %d my bw %d bw spent "
                     "enqueueing net msg %d time: %lld.\n",
                     m_node, getLinkBandwidth(), m_units_remaining[vnet],
                     m_ruby_system->curCycle());
@@ -209,6 +221,69 @@ Throttle::wakeup()
 void
 Throttle::regStats()
 {
+    throttleStats.m_input_queue_wait_total =
+        new statistics::Vector(&throttleStats, "input_queue_wait_total");
+    throttleStats.m_input_queue_wait_total
+        ->init(Network::getNumberOfVirtualNetworks())
+        .flags(statistics::nozero);
+
+    throttleStats.m_input_queue_wait_samples =
+        new statistics::Vector(&throttleStats, "input_queue_wait_samples");
+    throttleStats.m_input_queue_wait_samples
+        ->init(Network::getNumberOfVirtualNetworks())
+        .flags(statistics::nozero);
+
+    throttleStats.m_input_queue_wait_mean =
+        new statistics::Formula(&throttleStats, "input_queue_wait_mean");
+    throttleStats.m_input_queue_wait_mean
+        ->flags(statistics::nozero);
+
+    for (int vnet = 0; vnet < Network::getNumberOfVirtualNetworks(); ++vnet) {
+        std::string vnet_name = csprintf("vnet-%d", vnet);
+        throttleStats.m_input_queue_wait_total->subname(vnet, vnet_name);
+        throttleStats.m_input_queue_wait_samples->subname(vnet, vnet_name);
+        throttleStats.m_input_queue_wait_mean->subname(vnet, vnet_name);
+    }
+
+    *(throttleStats.m_input_queue_wait_mean) =
+        *(throttleStats.m_input_queue_wait_total) /
+        *(throttleStats.m_input_queue_wait_samples);
+
+    throttleStats.m_input_queue_wait_total_by_type =
+        new statistics::Vector(
+            &throttleStats, "input_queue_wait_total_by_type");
+    throttleStats.m_input_queue_wait_total_by_type
+        ->init(MessageSizeType_NUM)
+        .flags(statistics::nozero);
+
+    throttleStats.m_input_queue_wait_samples_by_type =
+        new statistics::Vector(
+            &throttleStats, "input_queue_wait_samples_by_type");
+    throttleStats.m_input_queue_wait_samples_by_type
+        ->init(MessageSizeType_NUM)
+        .flags(statistics::nozero);
+
+    throttleStats.m_input_queue_wait_mean_by_type =
+        new statistics::Formula(
+            &throttleStats, "input_queue_wait_mean_by_type");
+    throttleStats.m_input_queue_wait_mean_by_type
+        ->flags(statistics::nozero);
+
+    for (MessageSizeType type = MessageSizeType_FIRST;
+         type < MessageSizeType_NUM; ++type) {
+        std::string type_name = MessageSizeType_to_string(type);
+        throttleStats.m_input_queue_wait_total_by_type->subname(
+            type, type_name);
+        throttleStats.m_input_queue_wait_samples_by_type->subname(type,
+                                                                  type_name);
+        throttleStats.m_input_queue_wait_mean_by_type->subname(
+            type, type_name);
+    }
+
+    *(throttleStats.m_input_queue_wait_mean_by_type) =
+        *(throttleStats.m_input_queue_wait_total_by_type) /
+        *(throttleStats.m_input_queue_wait_samples_by_type);
+
     for (MessageSizeType type = MessageSizeType_FIRST;
          type < MessageSizeType_NUM; ++type) {
         throttleStats.m_msg_counts[(unsigned int)type] =

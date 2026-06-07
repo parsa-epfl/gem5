@@ -146,6 +146,10 @@ machine(MachineType:Directory, "Directory protocol")
     MachineID Requestor, desc="original requestor";
     bool WaitingWBAck, desc="DataBlk WB request sent, but no ack from mem yet";
     bool WaitingDMAAck, desc="DMA ack sent, waiting for unblock";
+    Cycles InitialRequestTime, default="Cycles(0)",
+        desc="time the request was first issued from the requester L1";
+    Cycles ForwardRequestTime, default="Cycles(0)",
+        desc="time the request was forwarded beyond the initial requester";
   }
 
   structure(TBETable, external = "yes") {
@@ -162,6 +166,7 @@ machine(MachineType:Directory, "Directory protocol")
 
   Tick clockEdge();
   Tick cyclesToTicks(Cycles c);
+  Cycles curCycle();
   void set_tbe(TBE b);
   void unset_tbe();
   MachineID mapAddressToMachine(Addr addr, MachineType mtype);
@@ -566,6 +571,9 @@ machine(MachineType:Directory, "Directory protocol")
           out_msg.Type := CoherenceResponseType:DATA;
         }
         out_msg.MessageSize := MessageSizeType:Response_Data;
+        out_msg.InitialRequestTime := tbe.InitialRequestTime;
+        out_msg.ForwardRequestTime := tbe.ForwardRequestTime;
+        out_msg.FirstResponseTime := curCycle();
       }
     }
   }
@@ -603,6 +611,8 @@ machine(MachineType:Directory, "Directory protocol")
           out_msg.Acks := out_msg.Acks - 1;
         }
         out_msg.MessageSize := MessageSizeType:Forwarded_Control;
+        out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+        out_msg.ForwardRequestTime := curCycle();
       }
     }
   }
@@ -620,6 +630,8 @@ machine(MachineType:Directory, "Directory protocol")
           out_msg.Acks := out_msg.Acks - 1;
         }
         out_msg.MessageSize := MessageSizeType:Forwarded_Control;
+        out_msg.InitialRequestTime := in_msg.InitialRequestTime;
+        out_msg.ForwardRequestTime := curCycle();
       }
     }
   }
@@ -818,6 +830,8 @@ machine(MachineType:Directory, "Directory protocol")
       tbe.Requestor := in_msg.Requestor;
       tbe.WaitingWBAck := false;
       tbe.WaitingDMAAck := false;
+      tbe.InitialRequestTime := in_msg.InitialRequestTime;
+      tbe.ForwardRequestTime := in_msg.ForwardRequestTime;
     }
   }
 

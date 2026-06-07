@@ -5,8 +5,8 @@
 
 import argparse
 import os
-from pathlib import Path
 import sys
+from pathlib import Path
 
 import m5
 from m5.objects import *
@@ -71,9 +71,14 @@ def normalize_args(args):
     # QPoints uses --num-cores; Ruby expects --num-cpus.
     args.num_cpus = args.num_cores
 
-    # The target model has one shared L2, acting as the LLC.
-    args.num_l2caches = 1
-    args.num_dirs = args.mem_channels
+    # Default to the legacy single shared L2/dir model unless the caller
+    # explicitly requests a sliced configuration through the CLI/config file.
+    if not any(arg == "--num-l2caches" or arg.startswith("--num-l2caches=")
+               for arg in sys.argv):
+        args.num_l2caches = 1
+    if not any(arg == "--num-dirs" or arg.startswith("--num-dirs=")
+               for arg in sys.argv):
+        args.num_dirs = args.mem_channels
 
     # Keep TAGE/BTB active even if run_gem5.sh omits them initially.
     if args.bp_type is None:
@@ -238,6 +243,29 @@ def configure_asid_geometry(system, args):
     )
 
 
+def configure_cpu_geometry(system, args):
+    cpus = get_cpus(system)
+    scalar_overrides = {
+        "fetchWidth": getattr(args, "fetch_width", None),
+        "decodeWidth": getattr(args, "decode_width", None),
+        "renameWidth": getattr(args, "rename_width", None),
+        "dispatchWidth": getattr(args, "dispatch_width", None),
+        "issueWidth": getattr(args, "issue_width", None),
+        "wbWidth": getattr(args, "wb_width", None),
+        "commitWidth": getattr(args, "commit_width", None),
+        "fetchQueueSize": getattr(args, "fetch_queue_size", None),
+        "numROBEntries": getattr(args, "rob_entries", None),
+        "LQEntries": getattr(args, "lq_entries", None),
+        "SQEntries": getattr(args, "sq_entries", None),
+        "numIQEntries": getattr(args, "iq_entries", None),
+    }
+
+    for cpu in cpus:
+        for attr, value in scalar_overrides.items():
+            if value is not None:
+                setattr(cpu, attr, int(value))
+
+
 def discover_tlb_restore_files(args):
     if not getattr(args, "restore_tlb_state", False):
         return {}
@@ -376,6 +404,7 @@ def create(args):
     ]
 
     configure_tlb_geometry(system, args)
+    configure_cpu_geometry(system, args)
     configure_tlb_restore(system, args)
     configure_btb_restore(system, args)
     configure_tage_restore(system, args)
@@ -554,6 +583,30 @@ def main():
                         help="Detailed warmup window in CPU cycles")
     parser.add_argument("--measurement-cycles", type=int, default=0,
                         help="Measurement window in CPU cycles")
+    parser.add_argument("--fetch-width", type=int, default=None,
+                        help="Override O3 fetch width")
+    parser.add_argument("--decode-width", type=int, default=None,
+                        help="Override O3 decode width")
+    parser.add_argument("--rename-width", type=int, default=None,
+                        help="Override O3 rename width")
+    parser.add_argument("--dispatch-width", type=int, default=None,
+                        help="Override O3 dispatch width")
+    parser.add_argument("--issue-width", type=int, default=None,
+                        help="Override O3 issue width")
+    parser.add_argument("--wb-width", type=int, default=None,
+                        help="Override O3 writeback width")
+    parser.add_argument("--commit-width", type=int, default=None,
+                        help="Override O3 commit width")
+    parser.add_argument("--fetch-queue-size", type=int, default=None,
+                        help="Override O3 fetch queue size")
+    parser.add_argument("--rob-entries", type=int, default=None,
+                        help="Override O3 ROB entries")
+    parser.add_argument("--lq-entries", type=int, default=None,
+                        help="Override O3 load queue entries")
+    parser.add_argument("--sq-entries", type=int, default=None,
+                        help="Override O3 store queue entries")
+    parser.add_argument("--iq-entries", type=int, default=None,
+                        help="Override O3 issue queue entries")
 
     Options.addCommonOptions(parser)
     Ruby.define_options(parser)
@@ -564,6 +617,7 @@ def main():
 
     root = Root(full_system=True)
     root.system = create(args)
+    root.apply_config(args.param)
 
     if args.restore is not None:
         m5.instantiate(args.restore)

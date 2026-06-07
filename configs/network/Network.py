@@ -61,6 +61,14 @@ def define_options(parser):
         default=128,
         help="width in bits for all links inside garnet.")
     parser.add_argument(
+        "--simple-int-link-bandwidth", action="store", type=int,
+        default=16,
+        help=(
+            "bandwidth_factor for internal links in the simple network; "
+            "the Crossbar topology uses these links to model shared "
+            "outgoing bandwidth"
+        ))
+    parser.add_argument(
         "--vcs-per-vnet", action="store", type=int, default=4,
         help="""number of virtual channels per virtual network
             inside garnet network.""")

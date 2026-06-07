@@ -1674,6 +1674,7 @@ TableWalker::memAttrsAArch64(ThreadContext *tc, TlbEntry &te,
             (1 << 11) |     // LPAE bit
             (te.ns << 9) |  // NS bit
             (sh << 7);
+
     }
 }
 

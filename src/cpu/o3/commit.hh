@@ -532,6 +532,10 @@ class Commit
         statistics::Vector memRefs;
         /** Stat for the total number of committed loads. */
         statistics::Vector loads;
+        /** Delay from memory completion to retire for committed loads. */
+        statistics::Distribution loadCompletionToRetire;
+        /** Delay from memory completion to retire for committed stores. */
+        statistics::Distribution storeCompletionToRetire;
         /** Stat for the total number of committed atomics. */
         statistics::Vector amos;
         /** Total number of committed memory barriers. */

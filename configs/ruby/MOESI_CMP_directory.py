@@ -514,6 +514,51 @@ def discover_moesi_l1d_clean_restore_files(options):
 
 def define_options(parser):
     parser.add_argument(
+        "--l1-data-latency", type=int, default=1,
+        help="MOESI L1 Ruby data array latency in cycles")
+    parser.add_argument(
+        "--l1-tag-latency", type=int, default=1,
+        help="MOESI L1 Ruby tag array latency in cycles")
+    parser.add_argument(
+        "--l2-data-latency", type=int, default=20,
+        help="MOESI L2 Ruby data array latency in cycles")
+    parser.add_argument(
+        "--l2-tag-latency", type=int, default=20,
+        help="MOESI L2 Ruby tag array latency in cycles")
+    parser.add_argument(
+        "--l1-request-latency", type=int, default=1,
+        help="MOESI L1 controller request enqueue latency in Ruby cycles")
+    parser.add_argument(
+        "--l1-response-latency", type=int, default=1,
+        help="MOESI L1 controller response enqueue latency in Ruby cycles")
+    parser.add_argument(
+        "--use-timeout-latency", type=int, default=50,
+        help=(
+            "MOESI L1 use-timeout latency in Ruby cycles for M_W/MM_W "
+            "ownership lockout release"
+        ))
+    parser.add_argument(
+        "--l2-request-latency", type=int, default=1,
+        help="MOESI L2 controller request enqueue latency in Ruby cycles")
+    parser.add_argument(
+        "--l2-response-latency", type=int, default=1,
+        help="MOESI L2 controller response enqueue latency in Ruby cycles")
+    parser.add_argument(
+        "--directory-latency", type=int, default=6,
+        help="MOESI directory response/forward latency in Ruby cycles")
+    parser.add_argument(
+        "--to-memory-controller-latency", type=int, default=1,
+        help="MOESI directory-to-memory enqueue latency in Ruby cycles")
+    parser.add_argument(
+        "--l1-tbes", type=int, default=256,
+        help="MOESI L1 controller transient buffer entries")
+    parser.add_argument(
+        "--l2-tbes", type=int, default=256,
+        help="MOESI L2 controller transient buffer entries")
+    parser.add_argument(
+        "--dir-tbes", type=int, default=256,
+        help="MOESI directory transient buffer entries")
+    parser.add_argument(
         "--observe-restored-nonllc-getx",
         action="store_true",
         help=(
@@ -615,17 +660,31 @@ def create_system(options, full_system, system, dma_ports, bootmem,
         l1i_cache = L1Cache(size = options.l1i_size,
                             assoc = options.l1i_assoc,
                             start_index_bit = block_size_bits,
-                            is_icache = True)
+                            is_icache = True,
+                            dataAccessLatency = options.l1_data_latency,
+                            tagAccessLatency = options.l1_tag_latency)
         l1d_cache = L1Cache(size = options.l1d_size,
                             assoc = options.l1d_assoc,
                             start_index_bit = block_size_bits,
-                            is_icache = False)
+                            is_icache = False,
+                            dataAccessLatency = options.l1_data_latency,
+                            tagAccessLatency = options.l1_tag_latency)
 
         clk_domain = cpus[i].clk_domain
 
         l1_cntrl = L1Cache_Controller(version=i, L1Icache=l1i_cache,
                                       L1Dcache=l1d_cache,
                                       send_evictions=send_evicts(options),
+                                      request_latency=(
+                                          options.l1_request_latency
+                                      ),
+                                      response_latency=(
+                                          options.l1_response_latency
+                                      ),
+                                      use_timeout_latency=(
+                                          options.use_timeout_latency
+                                      ),
+                                      number_of_TBEs=options.l1_tbes,
                                       transitions_per_cycle=options.ports,
                                       clk_domain=clk_domain,
                                       ruby_system=ruby_system,
@@ -660,6 +719,8 @@ def create_system(options, full_system, system, dma_ports, bootmem,
                                               i, ""
                                           )
                                       ))
+        if options.recycle_latency:
+            l1_cntrl.recycle_latency = options.recycle_latency
 
         cpu_seq = RubySequencer(version=i,
                                 dcache=l1d_cache, clk_domain=clk_domain,
@@ -753,7 +814,9 @@ def create_system(options, full_system, system, dma_ports, bootmem,
         #
         l2_cache = L2Cache(size = options.l2_size,
                            assoc = options.l2_assoc,
-                           start_index_bit = block_size_bits + l2_bits)
+                           start_index_bit = block_size_bits + l2_bits,
+                           dataAccessLatency = options.l2_data_latency,
+                           tagAccessLatency = options.l2_tag_latency)
 
         restore_instruction_state_arg = (
             i == 0 and instruction_restore_enabled
@@ -782,6 +845,13 @@ def create_system(options, full_system, system, dma_ports, bootmem,
 
         l2_cntrl = L2Cache_Controller(version = i,
                                       L2cache = l2_cache,
+                                      request_latency=(
+                                          options.l2_request_latency
+                                      ),
+                                      response_latency=(
+                                          options.l2_response_latency
+                                      ),
+                                      number_of_TBEs=options.l2_tbes,
                                       transitions_per_cycle = options.ports,
                                       ruby_system = ruby_system,
                                       addr_ranges = l2_addr_ranges[i],
@@ -850,6 +920,8 @@ def create_system(options, full_system, system, dma_ports, bootmem,
         l2_cntrl.fatal_on_restored_nonllc_getx = bool(
             getattr(options, "fatal_on_restored_nonllc_getx", False)
         )
+        if options.recycle_latency:
+            l2_cntrl.recycle_latency = options.recycle_latency
 
         exec("ruby_system.l2_cntrl%d = l2_cntrl" % i)
         l2_cntrl_nodes.append(l2_cntrl)
@@ -884,6 +956,14 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     if rom_dir_cntrl_node is not None:
         dir_cntrl_nodes.append(rom_dir_cntrl_node)
     for dir_cntrl in dir_cntrl_nodes:
+        dir_cntrl.transitions_per_cycle = options.ports
+        dir_cntrl.directory_latency = options.directory_latency
+        dir_cntrl.to_memory_controller_latency = (
+            options.to_memory_controller_latency
+        )
+        dir_cntrl.number_of_TBEs = options.dir_tbes
+        if options.recycle_latency:
+            dir_cntrl.recycle_latency = options.recycle_latency
         dir_cntrl.restore_llc_state = bool(restore_file)
         dir_cntrl.llc_restore_file = restore_file if restore_file else ""
         dir_cntrl.restore_private_owner_state = bool(
@@ -934,6 +1014,8 @@ def create_system(options, full_system, system, dma_ports, bootmem,
                                    dma_sequencer = dma_seq,
                                    transitions_per_cycle = options.ports,
                                    ruby_system = ruby_system)
+        if options.recycle_latency:
+            dma_cntrl.recycle_latency = options.recycle_latency
 
         exec("ruby_system.dma_cntrl%d = dma_cntrl" % i)
         dma_cntrl_nodes.append(dma_cntrl)
@@ -961,6 +1043,9 @@ def create_system(options, full_system, system, dma_ports, bootmem,
         io_controller = DMA_Controller(version = len(dma_ports),
                                        dma_sequencer = io_seq,
                                        ruby_system = ruby_system)
+        io_controller.transitions_per_cycle = options.ports
+        if options.recycle_latency:
+            io_controller.recycle_latency = options.recycle_latency
         ruby_system.io_controller = io_controller
 
         # Connect the dma controller to the network

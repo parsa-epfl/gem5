@@ -241,7 +241,24 @@ def discover_l1d_restore_files(options):
     return restore_files
 
 def define_options(parser):
-    return
+    parser.add_argument(
+        "--l1-request-latency", type=int, default=2,
+        help="L1 controller request enqueue latency in Ruby cycles")
+    parser.add_argument(
+        "--l1-response-latency", type=int, default=2,
+        help="L1 controller response enqueue latency in Ruby cycles")
+    parser.add_argument(
+        "--l2-request-latency", type=int, default=2,
+        help="L2 controller request enqueue latency in Ruby cycles")
+    parser.add_argument(
+        "--l2-response-latency", type=int, default=2,
+        help="L2 controller response enqueue latency in Ruby cycles")
+    parser.add_argument(
+        "--directory-latency", type=int, default=6,
+        help="Directory response/forward latency in Ruby cycles")
+    parser.add_argument(
+        "--to-mem-ctrl-latency", type=int, default=1,
+        help="Directory-to-memory enqueue latency in Ruby cycles")
 
 def create_system(options, full_system, system, dma_ports, bootmem,
                   ruby_system, cpus):
@@ -293,6 +310,12 @@ def create_system(options, full_system, system, dma_ports, bootmem,
         l1_cntrl = L1Cache_Controller(version = i, L1Icache = l1i_cache,
                                       L1Dcache = l1d_cache,
                                       l2_select_num_bits = l2_bits,
+                                      l1_request_latency=(
+                                          options.l1_request_latency
+                                      ),
+                                      l1_response_latency=(
+                                          options.l1_response_latency
+                                      ),
                                       send_evictions = send_evicts(options),
                                       prefetcher = prefetcher,
                                       restore_l1i_state=(
@@ -380,6 +403,12 @@ def create_system(options, full_system, system, dma_ports, bootmem,
         l2_cntrl = L2Cache_Controller(
                                       version = i,
                                       L2cache = l2_cache,
+                                      l2_request_latency=(
+                                          options.l2_request_latency
+                                      ),
+                                      l2_response_latency=(
+                                          options.l2_response_latency
+                                      ),
                                       restore_llc_state=(
                                           i == 0 and bool(restore_file)
                                       ),
@@ -432,6 +461,8 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     if rom_dir_cntrl_node is not None:
         dir_cntrl_nodes.append(rom_dir_cntrl_node)
     for dir_cntrl in dir_cntrl_nodes:
+        dir_cntrl.directory_latency = options.directory_latency
+        dir_cntrl.to_mem_ctrl_latency = options.to_mem_ctrl_latency
         dir_cntrl.restore_llc_state = bool(restore_file)
         dir_cntrl.llc_restore_file = restore_file if restore_file else ""
         dir_cntrl.restore_shared_private_state = bool(l2_shared_restore_file)
