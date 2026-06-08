@@ -410,6 +410,13 @@ def create(args):
     configure_tage_restore(system, args)
     configure_tage_decision_trace(system, args)
 
+    va_file = getattr(args, "va_file", None)
+    tlb_output_dir = getattr(args, "tlb_output_dir", None)
+    if va_file:
+        if not tlb_output_dir:
+            m5.fatal("--va-file requires --tlb-output-dir")
+        Path(tlb_output_dir).mkdir(parents=True, exist_ok=True)
+
     config_ruby(system, args)
     connect_system(system)
 
