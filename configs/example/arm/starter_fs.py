@@ -340,6 +340,7 @@ def create(args):
     system.addCaches(want_caches, last_cache_level=3)
 
     if args.va_file:
+        Path(args.tlb_output_dir).mkdir(parents=True, exist_ok=True)
         va_translators = []
         target_cpu_id = args.va_cpu_id
         if target_cpu_id is None:

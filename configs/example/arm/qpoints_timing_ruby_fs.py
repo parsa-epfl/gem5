@@ -410,6 +410,9 @@ def create(args):
     configure_tage_restore(system, args)
     configure_tage_decision_trace(system, args)
 
+    if args.va_file:
+        Path(args.tlb_output_dir).mkdir(parents=True, exist_ok=True)
+
     config_ruby(system, args)
     connect_system(system)
 
