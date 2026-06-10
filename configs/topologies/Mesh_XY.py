@@ -93,10 +93,18 @@ class Mesh_XY(SimpleTopology):
                                     latency = link_latency))
             link_count += 1
 
-        # Connect the remainding nodes to router 0.  These should only be
-        # DMA nodes.
+        # Connect the remaining nodes to router 0.
+        #
+        # Most protocols only leave DMA controllers in the remainder set.
+        # Full-system MOESI can also leave the ROM directory controller in
+        # the tail after the evenly-distributed cache+directory controllers.
+        # Those remainder nodes do not participate in the uniform per-router
+        # striping, so it is sufficient to pin them to router 0 here.
         for (i, node) in enumerate(remainder_nodes):
-            assert(node.type == 'DMA_Controller')
+            assert(
+                node.type == 'DMA_Controller'
+                or node.type == 'Directory_Controller'
+            )
             assert(i < remainder)
             ext_links.append(ExtLink(link_id=link_count, ext_node=node,
                                     int_node=routers[0],
