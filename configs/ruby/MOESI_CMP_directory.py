@@ -61,14 +61,21 @@ class L2Cache(RubyCache):
 GEM5_UARCH_SUFFIX = "gem5_uarch"
 RUBY_PROTOCOL_SUBDIR = "moesi_cmp_directory"
 LLC_RESTORE_STAGED = "llc_restore_addrs.txt"
+LLC_RESTORE_SLICE_STAGED_TEMPLATE = "llc_restore_addrs.slice{slice}.txt"
 MOESI_PRIVATE_OWNER_RESTORE_STAGED = (
     "moesi_single_private_data_writeable_restore.txt"
+)
+MOESI_PRIVATE_OWNER_RESTORE_SLICE_STAGED_TEMPLATE = (
+    "moesi_single_private_data_writeable_restore.slice{slice}.txt"
 )
 MOESI_PRIVATE_OWNER_L1D_RESTORE_TEMPLATE = (
     "moesi_l1d_single_private_data_writeable.core{core}.txt"
 )
 MOESI_PRIVATE_CLEAN_RESTORE_STAGED = (
     "moesi_single_private_data_clean_restore.txt"
+)
+MOESI_PRIVATE_CLEAN_RESTORE_SLICE_STAGED_TEMPLATE = (
+    "moesi_single_private_data_clean_restore.slice{slice}.txt"
 )
 MOESI_PRIVATE_CLEAN_L1D_RESTORE_TEMPLATE = (
     "moesi_l1d_single_private_data_clean.core{core}.txt"
@@ -79,6 +86,12 @@ MOESI_MULTI_PRIVATE_CLEAN_RESTORE_STAGED = (
 MOESI_MULTI_PRIVATE_CLEAN_NONLLC_RESTORE_STAGED = (
     "moesi_multi_private_data_clean_nonllc_restore.txt"
 )
+MOESI_MULTI_PRIVATE_CLEAN_RESTORE_SLICE_STAGED_TEMPLATE = (
+    "moesi_multi_private_data_clean_restore.slice{slice}.txt"
+)
+MOESI_MULTI_PRIVATE_CLEAN_NONLLC_RESTORE_SLICE_STAGED_TEMPLATE = (
+    "moesi_multi_private_data_clean_nonllc_restore.slice{slice}.txt"
+)
 MOESI_MULTI_PRIVATE_CLEAN_L1D_RESTORE_TEMPLATE = (
     "moesi_l1d_multi_private_data_clean.core{core}.txt"
 )
@@ -87,6 +100,12 @@ MOESI_PRIVATE_INSTRUCTION_ONLY_RESTORE_STAGED = (
 )
 MOESI_PRIVATE_INSTRUCTION_ONLY_NONLLC_RESTORE_STAGED = (
     "moesi_private_instruction_only_nonllc_restore.txt"
+)
+MOESI_PRIVATE_INSTRUCTION_ONLY_RESTORE_SLICE_STAGED_TEMPLATE = (
+    "moesi_private_instruction_only_restore.slice{slice}.txt"
+)
+MOESI_PRIVATE_INSTRUCTION_ONLY_NONLLC_RESTORE_SLICE_STAGED_TEMPLATE = (
+    "moesi_private_instruction_only_nonllc_restore.slice{slice}.txt"
 )
 MOESI_PRIVATE_INSTRUCTION_ONLY_L1I_RESTORE_TEMPLATE = (
     "moesi_l1i_private_instruction_only.core{core}.txt"
@@ -117,6 +136,16 @@ def _legacy_protocol_manifest_matches(gem5_uarch_dir: Path) -> bool:
     return payload.get("target_ruby_protocol") == RUBY_PROTOCOL_SUBDIR
 
 
+def _load_protocol_manifest(gem5_uarch_dir: Path):
+    manifest = gem5_uarch_dir / "manifest.json"
+    if not manifest.is_file():
+        return None
+    try:
+        return json.loads(manifest.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
 def discover_protocol_gem5_uarch_dir(restore_dir: Path):
     gem5_uarch_dir = discover_gem5_uarch_dir(restore_dir)
     protocol_dir = gem5_uarch_dir / RUBY_PROTOCOL_SUBDIR
@@ -125,6 +154,83 @@ def discover_protocol_gem5_uarch_dir(restore_dir: Path):
     if _legacy_protocol_manifest_matches(gem5_uarch_dir):
         return gem5_uarch_dir
     return protocol_dir
+
+
+def validate_moesi_slice_restore_contract(options):
+    if not getattr(options, "restore", None):
+        return
+
+    restore_dir = Path(options.restore).resolve()
+    gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
+    if not gem5_uarch_dir.is_dir():
+        return
+
+    manifest = _load_protocol_manifest(gem5_uarch_dir)
+    if not manifest:
+        return
+
+    staged_slice_count = manifest.get("llc_slice_count")
+    if staged_slice_count is None:
+        return
+
+    try:
+        staged_slice_count = int(staged_slice_count)
+    except (TypeError, ValueError):
+        m5.util.fatal(
+            "Invalid llc_slice_count in MOESI restore manifest "
+            f"{gem5_uarch_dir / 'manifest.json'}: {staged_slice_count!r}"
+        )
+
+    runtime_slice_count = int(getattr(options, "num_l2caches", 0))
+    if staged_slice_count != runtime_slice_count:
+        m5.util.fatal(
+            "MOESI sliced restore contract mismatch: staged gem5_uarch "
+            f"artifacts were prepared for {staged_slice_count} LLC slices, "
+            f"but the runtime was configured with --num-l2caches="
+            f"{runtime_slice_count}. Re-run convert-single with the same "
+            "MOESI sim-config that will be used at runtime."
+        )
+
+
+def _discover_moesi_slice_restore_files(
+    options,
+    *,
+    enabled_attr: str,
+    legacy_filename: str,
+    slice_template: str,
+    skip_message: str,
+):
+    if not getattr(options, enabled_attr, False):
+        return {}
+
+    if not getattr(options, "restore", None):
+        m5.util.warn(skip_message)
+        return {}
+
+    restore_dir = Path(options.restore).resolve()
+    gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
+    if not gem5_uarch_dir.is_dir():
+        m5.util.warn(
+            "Skipping slice-aware MOESI warm-state import; gem5_uarch "
+            f"directory is missing: {gem5_uarch_dir}"
+        )
+        return {}
+
+    slice_count = int(getattr(options, "num_l2caches", 0))
+    restore_files = {}
+    for slice_id in range(slice_count):
+        target_path = gem5_uarch_dir / slice_template.format(slice=slice_id)
+        if target_path.is_file():
+            restore_files[slice_id] = str(target_path)
+
+    if restore_files:
+        return restore_files
+
+    legacy_path = gem5_uarch_dir / legacy_filename
+    if slice_count == 1 and legacy_path.is_file():
+        return {0: str(legacy_path)}
+
+    return {}
 
 
 def discover_llc_restore_file(options):
@@ -158,6 +264,32 @@ def discover_llc_restore_file(options):
 
     return str(target_path)
 
+
+def discover_llc_restore_files(options):
+    restore_files = _discover_moesi_slice_restore_files(
+        options,
+        enabled_attr="restore_llc_state",
+        legacy_filename=LLC_RESTORE_STAGED,
+        slice_template=LLC_RESTORE_SLICE_STAGED_TEMPLATE,
+        skip_message=(
+            "--restore-llc-state was set without --restore; "
+            "skipping slice-aware LLC warm-state import."
+        ),
+    )
+    if not restore_files and getattr(options, "restore_llc_state", False):
+        restore_dir = (
+            Path(options.restore).resolve()
+            if getattr(options, "restore", None)
+            else None
+        )
+        if restore_dir is not None:
+            gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
+            m5.util.warn(
+                "No slice-aware LLC restore files were found in "
+                f"{gem5_uarch_dir}. Running without sliced LLC warm restore."
+            )
+    return restore_files
+
 def discover_moesi_private_owner_restore_file(options):
     if not getattr(options, "restore_l1d_state", False):
         return None
@@ -188,6 +320,33 @@ def discover_moesi_private_owner_restore_file(options):
         return None
 
     return str(target_path)
+
+
+def discover_moesi_private_owner_restore_files(options):
+    restore_files = _discover_moesi_slice_restore_files(
+        options,
+        enabled_attr="restore_l1d_state",
+        legacy_filename=MOESI_PRIVATE_OWNER_RESTORE_STAGED,
+        slice_template=MOESI_PRIVATE_OWNER_RESTORE_SLICE_STAGED_TEMPLATE,
+        skip_message=(
+            "--restore-l1d-state was set without --restore; "
+            "skipping slice-aware MOESI private-owner warm-state import."
+        ),
+    )
+    if not restore_files and getattr(options, "restore_l1d_state", False):
+        restore_dir = (
+            Path(options.restore).resolve()
+            if getattr(options, "restore", None)
+            else None
+        )
+        if restore_dir is not None:
+            gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
+            m5.util.warn(
+                "No slice-aware MOESI private-owner restore files were found "
+                f"in {gem5_uarch_dir}. Running without the "
+                "private-owner slice."
+            )
+    return restore_files
 
 
 def discover_moesi_private_clean_restore_file(options):
@@ -222,6 +381,33 @@ def discover_moesi_private_clean_restore_file(options):
     return str(target_path)
 
 
+def discover_moesi_private_clean_restore_files(options):
+    restore_files = _discover_moesi_slice_restore_files(
+        options,
+        enabled_attr="restore_l1d_state",
+        legacy_filename=MOESI_PRIVATE_CLEAN_RESTORE_STAGED,
+        slice_template=MOESI_PRIVATE_CLEAN_RESTORE_SLICE_STAGED_TEMPLATE,
+        skip_message=(
+            "--restore-l1d-state was set without --restore; "
+            "skipping slice-aware MOESI private-clean warm-state import."
+        ),
+    )
+    if not restore_files and getattr(options, "restore_l1d_state", False):
+        restore_dir = (
+            Path(options.restore).resolve()
+            if getattr(options, "restore", None)
+            else None
+        )
+        if restore_dir is not None:
+            gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
+            m5.util.warn(
+                "No slice-aware MOESI private-clean restore files were found "
+                f"in {gem5_uarch_dir}. Running without the "
+                "private-clean slice."
+            )
+    return restore_files
+
+
 def discover_moesi_multi_private_clean_restore_file(options):
     if not getattr(options, "restore_l1d_state", False):
         return None
@@ -253,6 +439,33 @@ def discover_moesi_multi_private_clean_restore_file(options):
         return None
 
     return str(target_path)
+
+
+def discover_moesi_multi_private_clean_restore_files(options):
+    restore_files = _discover_moesi_slice_restore_files(
+        options,
+        enabled_attr="restore_l1d_state",
+        legacy_filename=MOESI_MULTI_PRIVATE_CLEAN_RESTORE_STAGED,
+        slice_template=MOESI_MULTI_PRIVATE_CLEAN_RESTORE_SLICE_STAGED_TEMPLATE,
+        skip_message=(
+            "--restore-l1d-state was set without --restore; "
+            "skipping slice-aware MOESI multi-private clean warm-state import."
+        ),
+    )
+    if not restore_files and getattr(options, "restore_l1d_state", False):
+        restore_dir = (
+            Path(options.restore).resolve()
+            if getattr(options, "restore", None)
+            else None
+        )
+        if restore_dir is not None:
+            gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
+            m5.util.warn(
+                "No slice-aware MOESI multi-private clean restore files were "
+                f"found in {gem5_uarch_dir}. Running without the "
+                "multi-private clean slice."
+            )
+    return restore_files
 
 
 def discover_moesi_multi_private_clean_nonllc_restore_file(options):
@@ -289,6 +502,36 @@ def discover_moesi_multi_private_clean_nonllc_restore_file(options):
     return str(target_path)
 
 
+def discover_moesi_multi_private_clean_nonllc_restore_files(options):
+    restore_files = _discover_moesi_slice_restore_files(
+        options,
+        enabled_attr="restore_l1d_state",
+        legacy_filename=MOESI_MULTI_PRIVATE_CLEAN_NONLLC_RESTORE_STAGED,
+        slice_template=(
+            MOESI_MULTI_PRIVATE_CLEAN_NONLLC_RESTORE_SLICE_STAGED_TEMPLATE
+        ),
+        skip_message=(
+            "--restore-l1d-state was set without --restore; "
+            "skipping slice-aware MOESI non-LLC multi-private clean "
+            "warm-state import."
+        ),
+    )
+    if not restore_files and getattr(options, "restore_l1d_state", False):
+        restore_dir = (
+            Path(options.restore).resolve()
+            if getattr(options, "restore", None)
+            else None
+        )
+        if restore_dir is not None:
+            gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
+            m5.util.warn(
+                "No slice-aware MOESI non-LLC multi-private clean restore "
+                f"files were found in {gem5_uarch_dir}. Running without the "
+                "non-LLC multi-private clean slice."
+            )
+    return restore_files
+
+
 def discover_moesi_private_instruction_only_restore_file(options):
     if not getattr(options, "restore_l1i_state", False):
         return None
@@ -323,6 +566,36 @@ def discover_moesi_private_instruction_only_restore_file(options):
     return str(target_path)
 
 
+def discover_moesi_private_instruction_only_restore_files(options):
+    restore_files = _discover_moesi_slice_restore_files(
+        options,
+        enabled_attr="restore_l1i_state",
+        legacy_filename=MOESI_PRIVATE_INSTRUCTION_ONLY_RESTORE_STAGED,
+        slice_template=(
+            MOESI_PRIVATE_INSTRUCTION_ONLY_RESTORE_SLICE_STAGED_TEMPLATE
+        ),
+        skip_message=(
+            "--restore-l1i-state was set without --restore; "
+            "skipping slice-aware MOESI private instruction-only warm-state "
+            "import."
+        ),
+    )
+    if not restore_files and getattr(options, "restore_l1i_state", False):
+        restore_dir = (
+            Path(options.restore).resolve()
+            if getattr(options, "restore", None)
+            else None
+        )
+        if restore_dir is not None:
+            gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
+            m5.util.warn(
+                "No slice-aware MOESI private instruction-only restore files "
+                f"were found in {gem5_uarch_dir}. Running without the "
+                "instruction-only slice."
+            )
+    return restore_files
+
+
 def discover_moesi_private_instruction_only_nonllc_restore_file(options):
     if not getattr(options, "restore_l1i_state", False):
         return None
@@ -355,6 +628,36 @@ def discover_moesi_private_instruction_only_nonllc_restore_file(options):
         return None
 
     return str(target_path)
+
+
+def discover_moesi_private_instruction_only_nonllc_restore_files(options):
+    restore_files = _discover_moesi_slice_restore_files(
+        options,
+        enabled_attr="restore_l1i_state",
+        legacy_filename=MOESI_PRIVATE_INSTRUCTION_ONLY_NONLLC_RESTORE_STAGED,
+        slice_template=(
+            MOESI_PRIVATE_INSTRUCTION_ONLY_NONLLC_RESTORE_SLICE_STAGED_TEMPLATE
+        ),
+        skip_message=(
+            "--restore-l1i-state was set without --restore; "
+            "skipping slice-aware MOESI non-LLC instruction-only warm-state "
+            "import."
+        ),
+    )
+    if not restore_files and getattr(options, "restore_l1i_state", False):
+        restore_dir = (
+            Path(options.restore).resolve()
+            if getattr(options, "restore", None)
+            else None
+        )
+        if restore_dir is not None:
+            gem5_uarch_dir = discover_protocol_gem5_uarch_dir(restore_dir)
+            m5.util.warn(
+                "No slice-aware MOESI non-LLC instruction-only restore files "
+                f"were found in {gem5_uarch_dir}. Running without the "
+                "non-LLC instruction-only slice."
+            )
+    return restore_files
 
 
 def discover_moesi_l1d_restore_files(options):
@@ -585,6 +888,8 @@ def create_system(options, full_system, system, dma_ports, bootmem,
             "protocol to be built."
         )
 
+    validate_moesi_slice_restore_contract(options)
+
     cpu_sequencers = []
 
     #
@@ -613,22 +918,40 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     private_owner_restore_file = discover_moesi_private_owner_restore_file(
         options
     )
+    private_owner_restore_files = discover_moesi_private_owner_restore_files(
+        options
+    )
     private_clean_restore_file = discover_moesi_private_clean_restore_file(
+        options
+    )
+    private_clean_restore_files = discover_moesi_private_clean_restore_files(
         options
     )
     private_multi_clean_restore_file = (
         discover_moesi_multi_private_clean_restore_file(options)
     )
+    private_multi_clean_restore_files = (
+        discover_moesi_multi_private_clean_restore_files(options)
+    )
     private_multi_clean_nonllc_restore_file = (
         discover_moesi_multi_private_clean_nonllc_restore_file(options)
+    )
+    private_multi_clean_nonllc_restore_files = (
+        discover_moesi_multi_private_clean_nonllc_restore_files(options)
     )
     private_instruction_restore_file = (
         discover_moesi_private_instruction_only_restore_file(options)
     )
+    private_instruction_restore_files = (
+        discover_moesi_private_instruction_only_restore_files(options)
+    )
     private_instruction_nonllc_restore_file = (
         discover_moesi_private_instruction_only_nonllc_restore_file(options)
     )
-    owner_restore_enabled = bool(private_owner_restore_file)
+    private_instruction_nonllc_restore_files = (
+        discover_moesi_private_instruction_only_nonllc_restore_files(options)
+    )
+    owner_restore_enabled = bool(private_owner_restore_files)
     if l1d_restore_files and not owner_restore_enabled:
         m5.util.fatal(
             "Found MOESI private-owner L1D restore files without the "
@@ -641,13 +964,13 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     instruction_nonllc_directory_enabled = bool(
         private_instruction_nonllc_restore_file
     )
-    multi_clean_enabled = bool(private_multi_clean_restore_file)
+    multi_clean_enabled = bool(private_multi_clean_restore_files)
     multi_clean_nonllc_enabled = bool(
-        private_multi_clean_nonllc_restore_file
+        private_multi_clean_nonllc_restore_files
     )
-    instruction_restore_enabled = bool(private_instruction_restore_file)
+    instruction_restore_enabled = bool(private_instruction_restore_files)
     instruction_nonllc_restore_enabled = bool(
-        private_instruction_nonllc_restore_file
+        private_instruction_nonllc_restore_files
     )
     instruction_only_enabled = bool(
         instruction_restore_enabled or instruction_nonllc_restore_enabled
@@ -751,25 +1074,11 @@ def create_system(options, full_system, system, dma_ports, bootmem,
     l2_bits = int(math.log(options.num_l2caches, 2))
     numa_bit = block_size_bits + l2_bits - 1
     restore_file = discover_llc_restore_file(options)
-    if restore_file and options.num_l2caches != 1:
-        m5.util.fatal(
-            "--restore-llc-state currently supports only --num-l2caches=1; "
-            "got %d L2 caches." % options.num_l2caches
-        )
-    if private_owner_restore_file and options.num_l2caches != 1:
-        m5.util.fatal(
-            "MOESI private-owner warm restore currently supports only "
-            "--num-l2caches=1; got %d L2 caches." % options.num_l2caches
-        )
+    restore_files = discover_llc_restore_files(options)
     if private_clean_restore_file and not restore_file:
         m5.util.fatal(
             "MOESI private-clean warm restore requires --restore-llc-state "
             "so LLC-backed lines exist before local sharer metadata is added."
-        )
-    if private_clean_restore_file and options.num_l2caches != 1:
-        m5.util.fatal(
-            "MOESI private-clean warm restore currently supports only "
-            "--num-l2caches=1; got %d L2 caches." % options.num_l2caches
         )
     if private_multi_clean_restore_file and not restore_file:
         m5.util.fatal(
@@ -777,23 +1086,11 @@ def create_system(options, full_system, system, dma_ports, bootmem,
             "--restore-llc-state so LLC-backed lines exist before local "
             "sharer metadata is added."
         )
-    if (
-        multi_clean_enabled or multi_clean_nonllc_enabled
-    ) and options.num_l2caches != 1:
-        m5.util.fatal(
-            "MOESI multi-private clean warm restore currently supports only "
-            "--num-l2caches=1; got %d L2 caches." % options.num_l2caches
-        )
     if private_instruction_restore_file and not restore_file:
         m5.util.fatal(
             "MOESI private instruction-only warm restore requires "
             "--restore-llc-state so LLC-backed lines exist before local "
             "sharer metadata is added."
-        )
-    if instruction_only_enabled and options.num_l2caches != 1:
-        m5.util.fatal(
-            "MOESI private instruction-only warm restore currently supports "
-            "only --num-l2caches=1; got %d L2 caches." % options.num_l2caches
         )
 
     sysranges = [] + system.mem_ranges
@@ -818,29 +1115,29 @@ def create_system(options, full_system, system, dma_ports, bootmem,
                            dataAccessLatency = options.l2_data_latency,
                            tagAccessLatency = options.l2_tag_latency)
 
-        restore_instruction_state_arg = (
-            i == 0 and instruction_restore_enabled
+        llc_restore_file_arg = restore_files.get(i, "")
+        private_owner_restore_file_arg = private_owner_restore_files.get(i, "")
+        private_clean_restore_file_arg = private_clean_restore_files.get(i, "")
+        private_multi_clean_restore_file_arg = (
+            private_multi_clean_restore_files.get(i, "")
         )
         private_instruction_restore_file_arg = (
-            private_instruction_restore_file
-            if restore_instruction_state_arg
-            else ""
-        )
-        restore_instruction_nonllc_state_arg = (
-            i == 0 and instruction_nonllc_restore_enabled
+            private_instruction_restore_files.get(i, "")
         )
         private_instruction_nonllc_restore_file_arg = (
-            private_instruction_nonllc_restore_file
-            if restore_instruction_nonllc_state_arg
-            else ""
-        )
-        restore_multi_clean_nonllc_state_arg = (
-            i == 0 and multi_clean_nonllc_enabled
+            private_instruction_nonllc_restore_files.get(i, "")
         )
         private_multi_clean_nonllc_restore_file_arg = (
-            private_multi_clean_nonllc_restore_file
-            if restore_multi_clean_nonllc_state_arg
-            else ""
+            private_multi_clean_nonllc_restore_files.get(i, "")
+        )
+        restore_instruction_state_arg = bool(
+            private_instruction_restore_file_arg
+        )
+        restore_instruction_nonllc_state_arg = bool(
+            private_instruction_nonllc_restore_file_arg
+        )
+        restore_multi_clean_nonllc_state_arg = bool(
+            private_multi_clean_nonllc_restore_file_arg
         )
 
         l2_cntrl = L2Cache_Controller(version = i,
@@ -855,45 +1152,27 @@ def create_system(options, full_system, system, dma_ports, bootmem,
                                       transitions_per_cycle = options.ports,
                                       ruby_system = ruby_system,
                                       addr_ranges = l2_addr_ranges[i],
-                                      restore_llc_state=(
-                                          i == 0 and bool(restore_file)
+                                      restore_llc_state=bool(
+                                          llc_restore_file_arg
                                       ),
-                                      llc_restore_file=(
-                                          restore_file
-                                          if i == 0 and restore_file
-                                          else ""
-                                      ),
-                                      restore_private_owner_state=(
-                                          i == 0
-                                          and bool(private_owner_restore_file)
+                                      llc_restore_file=llc_restore_file_arg,
+                                      restore_private_owner_state=bool(
+                                          private_owner_restore_file_arg
                                       ),
                                       private_owner_restore_file=(
-                                          private_owner_restore_file
-                                          if (
-                                              i == 0
-                                              and private_owner_restore_file
-                                          )
-                                          else ""
+                                          private_owner_restore_file_arg
                                       ),
-                                      restore_private_clean_state=(
-                                          i == 0
-                                          and bool(private_clean_restore_file)
+                                      restore_private_clean_state=bool(
+                                          private_clean_restore_file_arg
                                       ),
                                       private_clean_restore_file=(
-                                          private_clean_restore_file
-                                          if (
-                                              i == 0
-                                              and private_clean_restore_file
-                                          )
-                                          else ""
+                                          private_clean_restore_file_arg
                                       ),
-                                      restore_private_multi_clean_state=(
-                                          i == 0 and multi_clean_enabled
+                                      restore_private_multi_clean_state=bool(
+                                          private_multi_clean_restore_file_arg
                                       ),
                                       private_multi_clean_restore_file=(
-                                          private_multi_clean_restore_file
-                                          if (i == 0 and multi_clean_enabled)
-                                          else ""
+                                          private_multi_clean_restore_file_arg
                                       ))
 
         l2_cntrl.restore_private_instruction_state = (
