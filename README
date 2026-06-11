@@ -1,37 +1,54 @@
-This is the gem5 simulator.
+This is a local gem5 fork used by the qflex/BXKraken checkpoint-conversion
+project.
 
-The main website can be found at http://www.gem5.org
+It should not be read as a generic upstream gem5 checkout with no special
+purpose. In this repository, gem5 is the timing-simulation backend for
+checkpoints created from BXKraken-origin source state and prepared through the
+surrounding qflex and QPoints workflow.
 
-A good starting point is http://www.gem5.org/about, and for
-more information about building the simulator and getting started
-please see http://www.gem5.org/documentation and
-http://www.gem5.org/documentation/learning_gem5/introduction.
+The maintained role of this fork is to:
 
-To build gem5, you will need the following software: g++ or clang,
-Python (gem5 links in the Python interpreter), SCons, SWIG, zlib, m4,
-and lastly protobuf if you want trace capture and playback
-support. Please see http://www.gem5.org/documentation/general_docs/building
-for more details concerning the minimum versions of the aforementioned tools.
+- consume gem5-compatible architectural checkpoint state prepared from qflex
+  snapshots
+- consume staged microarchitectural restore artifacts prepared by QPoints
+- run timing simulation on those restored checkpoints
+- support the protocol, cache-restore, TLB-restore, and timing-methodology
+  changes needed by this project
 
-Once you have all dependencies resolved, type 'scons
-build/<ARCH>/gem5.opt' where ARCH is one of ARM, NULL, MIPS, POWER, SPARC,
-or X86. This will build an optimized version of the gem5 binary (gem5.opt)
-for the the specified architecture. See
-http://www.gem5.org/documentation/general_docs/building for more details and
-options.
+The broader workflow around this fork is:
 
-The basic source release includes these subdirectories:
-   - configs: example simulation configuration scripts
-   - ext: less-common external packages needed to build gem5
-   - src: source code of the gem5 simulator
-   - system: source for some optional system software for simulated systems
-   - tests: regression tests
-   - util: useful utility programs and files
+1. qflex drives boot, workload bring-up, initialization, and functional
+   warming on the source side
+2. BXKraken-origin source state is captured as snapshots plus recorded
+   microarchitectural state
+3. qflex/QPoints convert that source state into a gem5-consumable checkpoint
+4. this gem5 fork restores the architectural and microarchitectural state and
+   performs timing simulation
 
-To run full-system simulations, you will need compiled system firmware
-(console and PALcode for Alpha), kernel binaries and one or more disk
-images.
+This fork therefore expects checkpoint inputs and restore artifacts prepared
+for it. It is not documented here as a standalone user entrypoint.
 
-If you have questions, please send mail to gem5-users@gem5.org
+For the maintained user-facing workflow, start from:
 
-Enjoy using gem5 and please share your modifications and extensions.
+- `../../docs/gem5_conversion/project_progress.md`
+- `../../docs/gem5_conversion/qflex_cli_guide.md`
+- `../README.md`
+
+For the current bridge-layer role of QPoints, see:
+
+- `../README.md`
+
+Build requirements remain broadly the same as upstream gem5: a working C++
+toolchain, Python, SCons, SWIG, zlib, m4, and protobuf when trace capture or
+playback support is needed.
+
+Typical project build targets in this repository are ARM Ruby timing binaries,
+for example:
+
+- `build/ARM_MESI_Two_Level/gem5.opt`
+- `build/ARM_MOESI_CMP_directory/gem5.opt`
+
+This fork also carries project-specific restore and timing changes. If you are
+trying to understand why a configuration or restore path exists here, assume
+first that it supports the BXKraken-to-gem5 checkpoint workflow rather than
+generic upstream gem5 usage.
