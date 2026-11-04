@@ -31,6 +31,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -181,9 +182,11 @@ VATranslator::parseJSON()
                     VaEntry e;
                     uint64_t vpn_json = ent.at("vpn").get<uint64_t>();
                     uint64_t ppn_json = ent.at("ppn").get<uint64_t>();
-                    e.va = vpn_json << 12;
+                    e.n = ent.value("n", (uint8_t)12);
+                    e.va = vpn_json << e.n;
                     e.vpn = vpn_json;
                     e.ppn = ppn_json;
+                    e.ts = ent.value("ts", (uint64_t)0);
                     e.mode = mode;
                     const auto &asid_json = ent.at("asid");
                     if (asid_json.is_string()) {
@@ -335,7 +338,7 @@ VATranslator::translateVA(const VaEntry *e, ThreadContext *tc)
         result.tlbEntry.asid = e->asid;
         result.tlbEntry.global = e->global;
 
-        const Addr src_pa = e->ppn << 12;
+        const Addr src_pa = e->ppn << e->n;
         const Addr gem5_pa = te->pAddr(e->va);
 
         if (e->vpn != te->vpn || e->ppn != te->pfn) {
@@ -344,23 +347,21 @@ VATranslator::translateVA(const VaEntry *e, ThreadContext *tc)
                 warn("ArmVATranslator: normalized VPN/PPN mismatch for entry "
                      "(CPU %d), but the VA->PA mapping was restored "
                      "successfully in gem5:\n"
-                     "  Source VPN/PPN (4KB units): 0x%lx / 0x%lx\n"
+                     "  Source VPN/PPN (N=%u): 0x%lx / 0x%lx\n"
                      "  gem5 VPN/PFN (N=%u, size=%#x): 0x%lx / 0x%lx\n"
                      "  VA: 0x%lx -> PA: 0x%lx\n"
-                     "  Note: this usually means the source dump encoded the "
-                     "entry at 4KB granularity while gem5 reconstructed a "
-                     "larger-page TLB entry. The source-side dump should "
-                     "preserve page-size granularity explicitly.\n",
-                     cpuId, e->vpn, e->ppn, te->N, te->size, te->vpn, te->pfn,
-                     e->va, gem5_pa);
+                     "  Note: the source and gem5 page walks found different "
+                     "page sizes for this mapping.\n",
+                     cpuId, e->n, e->vpn, e->ppn, te->N, te->size, te->vpn,
+                     te->pfn, e->va, gem5_pa);
             } else {
                 warn("ArmVATranslator: effective translation mismatch for "
                      "entry (CPU %d):\n"
-                     "  Source VPN/PPN (4KB units): 0x%lx / 0x%lx\n"
+                     "  Source VPN/PPN (N=%u): 0x%lx / 0x%lx\n"
                      "  gem5 VPN/PFN (N=%u, size=%#x): 0x%lx / 0x%lx\n"
                      "  VA: 0x%lx -> source PA: 0x%lx, gem5 PA: 0x%lx\n",
-                     cpuId, e->vpn, e->ppn, te->N, te->size, te->vpn, te->pfn,
-                     e->va, src_pa, gem5_pa);
+                     cpuId, e->n, e->vpn, e->ppn, te->N, te->size, te->vpn,
+                     te->pfn, e->va, src_pa, gem5_pa);
             }
         }
     } else {
@@ -401,6 +402,13 @@ VATranslator::writeResultsToCheckpoint(
             dtbResults.push_back(&res);
         }
     }
+
+    /* Sort MRU-first (descending source ts) */
+    auto byRecency = [](const TranslationResult *a, const TranslationResult *b) {
+        return a->va_entry->ts > b->va_entry->ts;
+    };
+    std::sort(itbResults.begin(), itbResults.end(), byRecency);
+    std::sort(dtbResults.begin(), dtbResults.end(), byRecency);
 
     std::string itbpath = base + ".itb";
     cp << "\n[" << itbpath << "]\n";
